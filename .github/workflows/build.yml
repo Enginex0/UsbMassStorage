@@ -40,6 +40,10 @@ jobs:
         with:
           validate-wrappers: false
 
+      - name: Decode keystore
+        if: matrix.profile == 'release'
+        run: echo "${{ secrets.RELEASE_KEYSTORE }}" | base64 -d > release.jks
+
       - name: Build APK (${{ matrix.profile }})
         run: |
           if [ "$PROFILE" = "release" ]; then
