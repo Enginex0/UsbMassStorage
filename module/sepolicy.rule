@@ -1,0 +1,3 @@
+type msd_daemon
+typeattribute msd_daemon domain
+typeattribute msd_daemon mlstrustedsubject

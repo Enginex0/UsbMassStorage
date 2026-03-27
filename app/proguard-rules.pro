@@ -1,0 +1,2 @@
+-keep class com.topjohnwu.superuser.** { *; }
+-keep class com.topjohnwu.superuser.internal.** { *; }

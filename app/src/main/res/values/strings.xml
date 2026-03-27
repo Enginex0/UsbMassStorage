@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name" translatable="false">USB Mass Storage</string>
+
+    <string name="title_settings">Settings</string>
+    <string name="title_how_to_use">How to Use</string>
+    <string name="action_refresh">Refresh</string>
+    <string name="action_menu">Menu</string>
+    <string name="action_back">Back</string>
+    <string name="action_close">Close</string>
+    <string name="action_copy">Copy</string>
+    <string name="action_retry">Retry</string>
+    <string name="action_apply">Apply</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_create">Create</string>
+    <string name="action_mount">Mount</string>
+    <string name="action_remove">Remove</string>
+    <string name="action_eject">Eject</string>
+    <string name="action_details">Details</string>
+
+    <string name="status_root_granted">Root: Granted</string>
+    <string name="status_root_not_granted">Root: Not granted</string>
+    <string name="desc_root_granted">Root granted</string>
+    <string name="desc_root_not_granted">Root not granted</string>
+    <string name="status_daemon_connected">Daemon: Connected</string>
+    <string name="status_daemon_disconnected">Daemon: Disconnected</string>
+    <string name="desc_daemon_connected">Daemon connected</string>
+    <string name="desc_daemon_disconnected">Daemon disconnected</string>
+    <string name="status_daemon_prefix">Daemon: %s</string>
+
+    <string name="status_connecting">Connecting…</string>
+    <string name="status_running_connected">Running (connected)</string>
+    <string name="status_running_not_connected">Running (not connected)</string>
+    <string name="status_stopped">Stopped</string>
+    <string name="status_error">error</string>
+    <string name="status_not_connected">Not connected to daemon</string>
+
+    <string name="no_devices_mounted">No USB devices mounted</string>
+    <string name="error_details_title">Error Details</string>
+
+    <string name="add_device_title">Mount USB Device</string>
+    <string name="add_device_select_file">Select disk image file</string>
+    <string name="add_device_type">Device Type</string>
+    <string name="type_read_write">Read-Write</string>
+    <string name="type_read_only">Read-Only</string>
+    <string name="type_cdrom">CD-ROM</string>
+    <string name="mounting">Mounting…</string>
+    <string name="create_new_image">Create new disk image</string>
+    <string name="add_device_fab">Add device</string>
+
+    <string name="edit_device_title">Edit Device</string>
+
+    <string name="device_type_cdrom">CD-ROM</string>
+    <string name="device_type_readonly">Read-Only Disk</string>
+    <string name="device_type_readwrite">Read-Write Disk</string>
+
+    <string name="settings_daemon_status">Daemon Status</string>
+    <string name="settings_restart_daemon">Restart Daemon</string>
+    <string name="settings_app_info">App Info</string>
+    <string name="settings_version">Version: %s</string>
+    <string name="settings_version_debug"> (debug)</string>
+    <string name="settings_debug_enabled">Debug mode enabled</string>
+    <string name="settings_debug_disabled">Debug mode disabled</string>
+    <string name="settings_debug_title">Debug</string>
+    <string name="settings_copy_logs">Copy Daemon Logs</string>
+    <string name="settings_logs_copied">Logs copied to clipboard</string>
+    <string name="settings_view_selinux">View SELinux Context</string>
+    <string name="settings_accent_color">Accent Color</string>
+    <string name="accent_system_default">System Default</string>
+    <string name="accent_almost_black">Almost Black</string>
+    <string name="accent_white">White</string>
+    <string name="settings_selected">Selected</string>
+    <string name="settings_debug_info">Debug Info</string>
+    <string name="settings_log_dir">Log dir: %s</string>
+    <string name="settings_daemon_pid">Daemon PID: %s</string>
+    <string name="settings_socket">Socket: @msdd (abstract)</string>
+    <string name="settings_build">Build: %s</string>
+
+    <string name="create_image_title">Create Disk Image</string>
+    <string name="create_image_filename">Filename</string>
+    <string name="create_image_size">Size (e.g. 512 MB, 1 GiB)</string>
+    <string name="create_image_size_display">= %s</string>
+    <string name="create_image_invalid_size">Invalid size format</string>
+    <string name="create_image_filename_required">Filename required</string>
+    <string name="create_image_invalid">Invalid size</string>
+
+    <string name="alert_not_local_file">File is not locally accessible (AppFuse proxy)</string>
+    <string name="alert_invalid_file">Selected file is not a regular file</string>
+
+    <string name="guide_what_title">What This App Does</string>
+    <string name="guide_what_body">Turns your phone into a USB drive. When connected to a computer via USB, the computer sees a disk image on your phone as a real USB storage device. You can mount .img files as USB sticks or .iso files as CD drives.</string>
+    <string name="guide_before_title">Before You Start</string>
+    <string name="guide_before_1">Root access required (KernelSU, Magisk, or APatch)</string>
+    <string name="guide_before_2">Grant root permission to this app in your root manager</string>
+    <string name="guide_before_3">Connect your phone to a computer via USB cable</string>
+    <string name="guide_mount_title">Mounting a Disk Image</string>
+    <string name="guide_mount_1">Tap the + button on the main screen</string>
+    <string name="guide_mount_2">Tap \"Select disk image file\" and pick your .img or .iso</string>
+    <string name="guide_mount_3">Select type: Read-Write (USB stick), Read-Only (write-protected), or CD-ROM (for ISOs)</string>
+    <string name="guide_mount_4">Tap \"Mount\". The computer detects a new USB device within seconds.</string>
+    <string name="guide_mount_5">To eject: tap the eject icon on the device card.</string>
+    <string name="guide_create_title">Creating a New Image</string>
+    <string name="guide_create_1">Tap +, then \"Create new disk image\"</string>
+    <string name="guide_create_2">Set filename and size (accepts MB, GB, GiB). Created instantly.</string>
+    <string name="guide_create_3">After mounting, format it from the computer (FAT32, exFAT, or NTFS).</string>
+    <string name="guide_multi_title">Multiple Devices</string>
+    <string name="guide_multi_body">Mount up to 8 devices simultaneously. Each appears as a separate USB device on the computer. Tap a device card to change its type or remove it.</string>
+    <string name="guide_issues_title">Common Issues</string>
+    <string name="guide_issue_daemon">Daemon not running</string>
+    <string name="guide_issue_daemon_fix">Reboot your device, or go to Settings and tap Restart Daemon.</string>
+    <string name="guide_issue_root">Root not granted</string>
+    <string name="guide_issue_root_fix">Open your root manager (KSU/Magisk) and grant this app root access.</string>
+    <string name="guide_issue_usb">Computer doesn\'t detect USB</string>
+    <string name="guide_issue_usb_fix">Reconnect the cable. Check that USB debugging isn\'t overriding gadget mode.</string>
+    <string name="guide_issue_appfuse">AppFuse proxy</string>
+    <string name="guide_issue_appfuse_fix">Your file picker is proxying the file. Use a different file manager (not Google Files).</string>
+</resources>
