@@ -99,6 +99,20 @@
     <string name="create_image_formatting">Formatting…</string>
     <string name="create_image_creating">Creating…</string>
     <string name="action_create_mount">Create &amp; Mount</string>
+    <string name="action_export">Export</string>
+    <string name="action_delete">Delete</string>
+
+    <string name="create_image_subtitle">Craft a virtual USB drive</string>
+
+    <string name="images_title">Disk Images</string>
+    <string name="images_empty">No disk images yet</string>
+    <string name="images_empty_hint">Create your first virtual USB drive</string>
+    <string name="images_create_new">Create New</string>
+    <string name="images_mounted">Mounted</string>
+    <string name="images_delete_title">Delete Image?</string>
+    <string name="images_delete_message">Permanently delete \"%s\"? This cannot be undone.</string>
+    <string name="images_export_success">Exported to Downloads</string>
+    <string name="images_export_failed">Export failed</string>
 
     <string name="format_fat32">FAT32</string>
     <string name="format_exfat">exFAT</string>

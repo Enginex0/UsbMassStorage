@@ -78,6 +78,7 @@ fun DeviceListScreen(
     onAddDevice: () -> Unit,
     onSettings: () -> Unit,
     onGuide: () -> Unit = {},
+    onImages: () -> Unit = {},
     onEjectDevice: (Int) -> Unit,
     onDeviceClick: (Int) -> Unit = {},
     onAcknowledgeAlert: () -> Unit = {}
@@ -160,6 +161,13 @@ fun DeviceListScreen(
                             expanded = menuExpanded,
                             onDismissRequest = { menuExpanded = false }
                         ) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.images_title)) },
+                                onClick = {
+                                    menuExpanded = false
+                                    onImages()
+                                }
+                            )
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.title_settings)) },
                                 onClick = {

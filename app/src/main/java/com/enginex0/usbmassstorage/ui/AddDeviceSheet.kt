@@ -48,7 +48,8 @@ private const val TAG = "UsbMsUI"
 fun AddDeviceSheet(
     mounting: Boolean,
     onMount: (DeviceInfo) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onCreateImage: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -56,7 +57,6 @@ fun AddDeviceSheet(
     var selectedUri by remember { mutableStateOf<Uri?>(null) }
     var selectedName by remember { mutableStateOf<String?>(null) }
     var selectedType by remember { mutableStateOf(DeviceType.DISK_RW) }
-    var showCreateDialog by remember { mutableStateOf(false) }
 
     val filePicker = rememberLauncherForActivityResult(
         contract = object : ActivityResultContracts.OpenDocument() {
@@ -169,7 +169,7 @@ fun AddDeviceSheet(
             }
 
             TextButton(
-                onClick = { showCreateDialog = true },
+                onClick = onCreateImage,
                 modifier = Modifier.align(Alignment.CenterHorizontally)
             ) {
                 Text(stringResource(R.string.create_new_image))
@@ -179,13 +179,4 @@ fun AddDeviceSheet(
         }
     }
 
-    if (showCreateDialog) {
-        CreateImageDialog(
-            onDismiss = { showCreateDialog = false },
-            onCreated = { deviceInfo ->
-                showCreateDialog = false
-                onMount(deviceInfo)
-            }
-        )
-    }
 }

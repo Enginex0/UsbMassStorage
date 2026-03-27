@@ -22,9 +22,11 @@ import androidx.navigation.compose.rememberNavController
 import com.enginex0.usbmassstorage.data.AccentColor
 import com.enginex0.usbmassstorage.data.AccentPreference
 import com.enginex0.usbmassstorage.ui.AddDeviceSheet
+import com.enginex0.usbmassstorage.ui.CreateImageSheet
 import com.enginex0.usbmassstorage.ui.DeviceEditSheet
 import com.enginex0.usbmassstorage.ui.DeviceListScreen
 import com.enginex0.usbmassstorage.ui.GuideScreen
+import com.enginex0.usbmassstorage.ui.ImageManagerScreen
 import com.enginex0.usbmassstorage.ui.SettingsScreen
 import com.enginex0.usbmassstorage.ui.theme.UsbMassStorageTheme
 import com.enginex0.usbmassstorage.viewmodel.MainViewModel
@@ -56,6 +58,7 @@ private fun UsbMassStorageApp(
     val context = LocalContext.current
 
     var showAddSheet by remember { mutableStateOf(false) }
+    var showCreateSheet by remember { mutableStateOf(false) }
     var editDeviceIndex by remember { mutableIntStateOf(-1) }
     var bgIndex by remember { mutableIntStateOf(0) }
 
@@ -75,6 +78,7 @@ private fun UsbMassStorageApp(
                 onAddDevice = { showAddSheet = true },
                 onSettings = { navController.navigate("settings") },
                 onGuide = { navController.navigate("guide") },
+                onImages = { navController.navigate("images") },
                 onEjectDevice = { index -> vm.ejectDevice(context, index) },
                 onDeviceClick = { index -> editDeviceIndex = index },
                 onAcknowledgeAlert = { vm.acknowledgeAlert() }
@@ -92,6 +96,18 @@ private fun UsbMassStorageApp(
         composable("guide") {
             GuideScreen(onBack = { navController.popBackStack() })
         }
+        composable("images") {
+            ImageManagerScreen(
+                mountedPaths = state.activeDevices.map { it.file }.toSet(),
+                onBack = { navController.popBackStack() },
+                onMount = { deviceInfo ->
+                    if (deviceInfo.uri.scheme != "file") {
+                        vm.takePersistablePermission(context, deviceInfo.uri)
+                    }
+                    vm.addDevice(context, deviceInfo)
+                }
+            )
+        }
     }
 
     if (showAddSheet) {
@@ -103,7 +119,21 @@ private fun UsbMassStorageApp(
                 }
                 vm.addDevice(context, deviceInfo)
             },
-            onDismiss = { showAddSheet = false }
+            onDismiss = { showAddSheet = false },
+            onCreateImage = {
+                showAddSheet = false
+                showCreateSheet = true
+            }
+        )
+    }
+
+    if (showCreateSheet) {
+        CreateImageSheet(
+            onDismiss = { showCreateSheet = false },
+            onCreated = { deviceInfo ->
+                showCreateSheet = false
+                vm.addDevice(context, deviceInfo)
+            }
         )
     }
 
