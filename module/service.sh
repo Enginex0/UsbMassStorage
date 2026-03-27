@@ -32,15 +32,31 @@ if [ ! -f "$BIN" ]; then
     exit 1
 fi
 
-echo "COUNT=0" > /data/adb/usbmassstorage/count.sh 2>/dev/null
+# Trigger app-side mount after boot via explicit broadcast.
+# App process has matching MCS categories to open its own files.
+# Explicit broadcast bypasses MIUI auto-start and stopped-app restrictions.
+(
+    while [ "$(getprop sys.boot_completed)" != "1" ]; do sleep 2; done
+    sleep 3
+    am broadcast \
+        -a android.intent.action.BOOT_COMPLETED \
+        -n com.enginex0.usbmassstorage/.BootMountReceiver \
+        --include-stopped-packages --user 0 \
+        > /dev/null 2>&1
+    echo "${TAG}: sent boot mount broadcast to app" > /dev/kmsg
+) &
 
-# Respawn loop: restart daemon on crash with backoff, cap at 30s
 BACKOFF=1
 while true; do
     echo "${TAG}: launching daemon (ABI=$ABI)" > /dev/kmsg
-    /system/bin/runcon u:r:msd_daemon:s0 "$BIN" daemon --log-target logcat --log-level debug --automount-config /data/adb/usbmassstorage/automount.conf
+    /system/bin/runcon u:r:msd_daemon:s0 "$BIN" daemon \
+        --log-target logcat --log-level debug \
+        --automount-config /data/adb/usbmassstorage/automount.conf
     rc=$?
-    [ $rc -eq 0 ] && break
+    if [ $rc -eq 0 ]; then
+        echo "COUNT=0" > /data/adb/usbmassstorage/count.sh 2>/dev/null
+        break
+    fi
     echo "${TAG}: daemon exited ($rc), respawning in ${BACKOFF}s" > /dev/kmsg
     sleep "$BACKOFF"
     BACKOFF=$((BACKOFF * 2))
