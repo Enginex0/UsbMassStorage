@@ -17,10 +17,17 @@ android {
 
     signingConfigs {
         create("release") {
+            val props = rootProject.file("local.properties")
+                .takeIf { it.exists() }
+                ?.inputStream()?.use { java.util.Properties().apply { load(it) } }
+
             storeFile = file("../release.jks")
-            storePassword = "usbmassstorage"
-            keyAlias = "usbms"
-            keyPassword = "usbmassstorage"
+            storePassword = System.getenv("KEYSTORE_PASSWORD")
+                ?: props?.getProperty("keystore.password") ?: ""
+            keyAlias = System.getenv("KEY_ALIAS")
+                ?: props?.getProperty("key.alias") ?: "usbms"
+            keyPassword = System.getenv("KEY_PASSWORD")
+                ?: props?.getProperty("key.password") ?: ""
         }
     }
 
