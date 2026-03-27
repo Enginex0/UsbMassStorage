@@ -188,6 +188,22 @@ fn handle_get_functions_request() -> Result<BTreeMap<OsString, OsString>> {
     gadget.configs()
 }
 
+fn open_lower_fs(fd: &impl AsFd) -> Option<File> {
+    let link = format!("/proc/self/fd/{}", fd.as_fd().as_raw_fd());
+    let target = fs::read_link(&link).ok()?;
+    let path = target.to_str()?;
+    let rest = path.strip_prefix("/storage/emulated/")?;
+    let lower = format!("/data/media/{rest}");
+
+    fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&lower)
+        .or_else(|_| fs::OpenOptions::new().read(true).open(&lower))
+        .inspect(|_| debug!("Resolved FUSE path to lower fs: {lower}"))
+        .ok()
+}
+
 fn handle_set_mass_storage_request(request: &SetMassStorageRequest) -> Result<()> {
     static LOCK: Mutex<()> = Mutex::new(());
     let _lock = LOCK.lock().unwrap();
@@ -298,13 +314,15 @@ fn handle_set_mass_storage_request(request: &SetMassStorageRequest) -> Result<()
             .open_mass_storage_function(&function_name)?
             .ok_or_else(|| anyhow!("Newly created function does not exist: {function_name:?}"))?;
         for (lun, device) in request.devices.iter().enumerate() {
-            // lun.0 exists by default.
             if lun > 0 && function.create_lun(lun as u8)? {
                 debug!("Created LUN #{lun}");
             }
 
+            let lower = open_lower_fs(&device.fd);
+            let fd = lower.as_ref().map(|f| f.as_fd()).unwrap_or(device.fd.as_fd());
+
             debug!("Associating LUN #{lun} with {device:?}");
-            function.set_lun(lun as u8, device.fd.as_fd(), device.cdrom, device.ro)?;
+            function.set_lun(lun as u8, fd, device.cdrom, device.ro)?;
         }
 
         if gadget.create_config(config_name, &function_name)? {
@@ -407,14 +425,15 @@ fn drop_privileges() -> Result<()> {
 
     let supplementary_groups: &[Gid] = if is_sdcardfs()? {
         &[
-            // Android 10 emulator.
             Gid::from_raw(1015), // sdcard_rw
-            // Samsung.
             Gid::from_raw(1023), // media_rw
             Gid::from_raw(9997), // everybody
         ]
     } else {
-        &[]
+        &[
+            Gid::from_raw(1023), // media_rw
+            Gid::from_raw(1078), // ext_data_rw
+        ]
     };
 
     if real_uid == system_uid && real_gid == system_gid {

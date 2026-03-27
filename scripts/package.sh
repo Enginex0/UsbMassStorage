@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Build, package, deploy, and verify UsbMassStorage module ZIPs.
+# Full pipeline: build APK, package module ZIP, deploy, reboot.
 # Usage: ./scripts/package.sh [flags]
 #
 # Examples:
-#   ./scripts/package.sh                               # package module ZIP
-#   ./scripts/package.sh --apk=app/build/.../app.apk   # bundle APK into ZIP
-#   ./scripts/package.sh --deploy --reboot              # push, install, reboot
-#   ./scripts/package.sh --deploy --verify              # deploy + logcat check
+#   ./scripts/package.sh                    # build APK + package ZIP
+#   ./scripts/package.sh --deploy --reboot  # full pipeline: build, deploy, reboot
+#   ./scripts/package.sh --no-build         # skip Gradle, use existing APK
+#   ./scripts/package.sh --apk=path.apk    # use specific APK instead of building
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -16,10 +16,12 @@ OUT_DIR="$PROJECT_ROOT/out"
 PROP_FILE="$MODULE_DIR/module.prop"
 
 APK_PATH=""
+BUILD=true
 DEPLOY=false
 REBOOT=false
 VERIFY=false
 TRACE=false
+BUILD_TYPE="debug"
 ROOT_PROVIDER="ksu"
 
 red()    { printf '\033[0;31m%s\033[0m\n' "$*"; }
@@ -31,8 +33,10 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") [options]
 
-Package options:
-  --apk=PATH         Bundle APK into flashable ZIP
+Build options:
+  --no-build         Skip Gradle build, use existing APK
+  --release          Build release APK (default: debug)
+  --apk=PATH         Use specific APK instead of building
 
 Deploy options:
   --deploy           Push ZIP to device and install
@@ -49,7 +53,9 @@ EOF
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --apk=*)      APK_PATH="${1#--apk=}"; shift ;;
+        --apk=*)      APK_PATH="${1#--apk=}"; BUILD=false; shift ;;
+        --no-build)   BUILD=false; shift ;;
+        --release)    BUILD_TYPE="release"; shift ;;
         --deploy)     DEPLOY=true; shift ;;
         --reboot)     REBOOT=true; shift ;;
         --verify)     VERIFY=true; shift ;;
@@ -83,20 +89,42 @@ fi
 OUTPUT="$OUT_DIR/UsbMassStorage-${VERSION}.zip"
 
 echo ""
-bold "UsbMassStorage package pipeline"
+bold "UsbMassStorage full pipeline"
 echo ""
+
+if [[ "$BUILD" == true ]]; then
+    bold "==> Building APK ($BUILD_TYPE)"
+    cd "$PROJECT_ROOT"
+    if [[ "$BUILD_TYPE" == "release" ]]; then
+        ./gradlew assembleRelease -q
+        APK_PATH="$PROJECT_ROOT/app/build/outputs/apk/release/app-release.apk"
+    else
+        ./gradlew assembleDebug -q
+        APK_PATH="$PROJECT_ROOT/app/build/outputs/apk/debug/app-debug.apk"
+    fi
+    if [[ ! -f "$APK_PATH" ]]; then
+        red "APK build failed: $APK_PATH not found"
+        exit 1
+    fi
+    green "    APK: $(basename "$APK_PATH")"
+fi
+
+if [[ -z "$APK_PATH" ]]; then
+    APK_PATH="$PROJECT_ROOT/app/build/outputs/apk/debug/app-debug.apk"
+    if [[ ! -f "$APK_PATH" ]]; then
+        APK_PATH="$PROJECT_ROOT/app/build/outputs/apk/release/app-release.apk"
+    fi
+fi
 
 bold "==> Packaging $VERSION"
 mkdir -p "$OUT_DIR"
 rm -f "$OUTPUT"
 
-if [[ -n "$APK_PATH" ]]; then
-    if [[ ! -f "$APK_PATH" ]]; then
-        red "APK not found: $APK_PATH"
-        exit 1
-    fi
+if [[ -n "$APK_PATH" && -f "$APK_PATH" ]]; then
     green "    Bundling APK: $(basename "$APK_PATH")"
     cp "$APK_PATH" "$MODULE_DIR/app.apk"
+else
+    yellow "    No APK found, packaging module-only ZIP"
 fi
 
 (cd "$MODULE_DIR" && zip -r9 "$OUTPUT" . -x '*.DS_Store' -x '__MACOSX/*')
@@ -121,7 +149,15 @@ if [[ "$DEPLOY" == true ]]; then
     bold "==> Deploying $(basename "$OUTPUT")"
     adb push "$OUTPUT" /data/local/tmp/module.zip
     adb shell "su -c '$INSTALL_CMD /data/local/tmp/module.zip'"
-    green "    Installed via $ROOT_PROVIDER"
+    green "    Module installed via $ROOT_PROVIDER"
+
+    bold "==> Installing APK"
+    if [[ -n "$APK_PATH" && -f "$APK_PATH" ]]; then
+        adb install -r "$APK_PATH" 2>&1 | tail -1
+        green "    APK installed"
+    else
+        yellow "    No APK to install"
+    fi
 
     if [[ "$REBOOT" == true ]]; then
         bold "==> Rebooting"
@@ -167,11 +203,11 @@ if [[ "$VERIFY" == true ]]; then
         yellow "    AVC denials: $local_denials (run: dmesg | grep 'avc.*msd')"
     fi
 
-    local_errors=$(adb logcat -d -s msd-tool 2>/dev/null | grep -ciE 'error|exception' || true)
+    local_errors=$(adb logcat -d -s daemon 2>/dev/null | grep -ciE 'error|exception' || true)
     if [[ "$local_errors" -eq 0 ]]; then
         green "    Logcat errors: 0"
     else
-        yellow "    Logcat errors: $local_errors (run: adb logcat -d -s msd-tool)"
+        yellow "    Logcat errors: $local_errors (run: adb logcat -d -s daemon)"
     fi
 fi
 

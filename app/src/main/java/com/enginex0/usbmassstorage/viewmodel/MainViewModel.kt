@@ -64,6 +64,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
     private var client: DaemonClient? = null
+    private val daemonLock = Any()
     private val store = DeviceStore(application)
     private var reconnectJob: Job? = null
 
@@ -71,6 +72,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         Log.d(TAG, "ViewModel init, connecting to daemon")
         _uiState.update { it.copy(savedDevices = store.load()) }
         refresh()
+    }
+
+    // Daemon connections die when MIUI/HyperOS kills the background process;
+    // serialize access and retry once with a fresh socket on IOException.
+    private fun <T> withDaemon(block: (DaemonClient) -> T): T = synchronized(daemonLock) {
+        var c = client ?: DaemonClient().also { client = it }
+        try {
+            return@synchronized block(c)
+        } catch (_: java.io.IOException) {
+            Log.w(TAG, "withDaemon: stale connection, reconnecting")
+            try { c.close() } catch (_: Exception) {}
+        }
+        c = DaemonClient()
+        client = c
+        try {
+            block(c)
+        } catch (e: java.io.IOException) {
+            try { c.close() } catch (_: Exception) {}
+            client = null
+            throw e
+        }
     }
 
     fun refresh() {
@@ -84,14 +106,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             Log.d(TAG, "refresh: rootGranted=$hasRoot")
 
             try {
-                val (newClient, functions, devices) = withContext(Dispatchers.IO) {
-                    client?.close()
-                    val c = DaemonClient()
-                    val f = c.getFunctions()
-                    val d = c.getMassStorage()
-                    Triple(c, f, d)
+                val (functions, devices) = withContext(Dispatchers.IO) {
+                    synchronized(daemonLock) {
+                        client?.close()
+                        client = null
+                        val c = DaemonClient()
+                        client = c
+                        c.getFunctions() to c.getMassStorage()
+                    }
                 }
-                client = newClient
 
                 _uiState.update {
                     it.copy(
@@ -114,7 +137,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "refresh: connection failed", e)
-                client = null
+                synchronized(daemonLock) {
+                    client?.close()
+                    client = null
+                }
                 pushAlert(Alert.QueryFailure(e.toAlertMessage()))
                 val daemonAlive = withContext(Dispatchers.IO) { checkDaemonStatus() }
                 _uiState.update {
@@ -160,13 +186,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             fdPairs.add(pfd.fileDescriptor to info.type)
                         }
 
-                        var c = client
-                        if (c == null) {
-                            Log.d(TAG, "setMassStorage: reconnecting to daemon")
-                            c = DaemonClient()
-                            client = c
-                        }
-                        c.setMassStorage(fdPairs)
+                        withDaemon { c -> c.setMassStorage(fdPairs) }
                     } finally {
                         pfds.forEach { pfd ->
                             try { pfd.close() } catch (_: Exception) {}
@@ -208,10 +228,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.update { it.copy(mounting = false) }
             } catch (e: Exception) {
                 Log.e(TAG, "setMassStorage: failed", e)
-                if (e is java.io.IOException) {
-                    client?.close()
-                    client = null
-                }
                 pushAlert(Alert.MountFailure(e.toAlertMessage()))
                 _uiState.update { it.copy(mounting = false) }
             }
@@ -229,13 +245,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             try {
                 withContext(Dispatchers.IO) {
-                    var c = client
-                    if (c == null) {
-                        Log.d(TAG, "clearDevices: reconnecting to daemon")
-                        c = DaemonClient()
-                        client = c
-                    }
-                    c.setMassStorage(emptyList())
+                    withDaemon { c -> c.setMassStorage(emptyList()) }
                 }
                 Log.d(TAG, "clearDevices: success")
                 store.clear()
@@ -243,10 +253,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 refreshDevices()
             } catch (e: Exception) {
                 Log.e(TAG, "clearDevices: failed", e)
-                if (e is java.io.IOException) {
-                    client?.close()
-                    client = null
-                }
                 pushAlert(Alert.MountFailure(e.toAlertMessage()))
             }
         }
@@ -300,8 +306,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _uiState.update { it.copy(connecting = true) }
 
             withContext(Dispatchers.IO) {
-                client?.close()
-                client = null
+                synchronized(daemonLock) {
+                    client?.close()
+                    client = null
+                }
                 Shell.cmd("pkill -f '/bin/.*/daemon' 2>/dev/null; sleep 0.5; rm -f /dev/usbms_svc_lock; sh /data/adb/modules/usbmassstorage/service.sh &").exec()
             }
 
@@ -320,7 +328,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun startReconnect() {
         if (reconnectJob?.isActive == true) return
         reconnectJob = viewModelScope.launch {
-            // Exponential backoff: 3s, 6s, 12s, cap at 30s
             var interval = 3000L
             while (true) {
                 delay(interval)
@@ -408,28 +415,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun refreshDevices() {
         try {
             val devices = withContext(Dispatchers.IO) {
-                val c = client ?: return@withContext emptyList()
-                enrichWithSize(c.getMassStorage())
+                val raw = withDaemon { c -> c.getMassStorage() }
+                enrichWithSize(raw)
             }
             _uiState.update { it.copy(activeDevices = devices) }
             Log.d(TAG, "refreshDevices: ${devices.size} active devices")
-        } catch (e: java.io.IOException) {
-            // Daemon closed connection after SetMassStorage, reconnect
-            Log.w(TAG, "refreshDevices: connection lost, reconnecting")
-            client?.close()
-            client = null
-            try {
-                val (c, devices) = withContext(Dispatchers.IO) {
-                    val c = DaemonClient()
-                    val d = enrichWithSize(c.getMassStorage())
-                    c to d
-                }
-                client = c
-                _uiState.update { it.copy(activeDevices = devices) }
-                Log.d(TAG, "refreshDevices: reconnected, ${devices.size} active devices")
-            } catch (e2: Exception) {
-                Log.e(TAG, "refreshDevices: reconnect failed", e2)
-            }
         } catch (e: Exception) {
             Log.e(TAG, "refreshDevices: failed", e)
         }
@@ -449,8 +439,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         super.onCleared()
         Log.d(TAG, "onCleared: closing client")
         reconnectJob?.cancel()
-        client?.close()
-        client = null
+        synchronized(daemonLock) {
+            client?.close()
+            client = null
+        }
     }
 }
 

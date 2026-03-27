@@ -1,0 +1,11 @@
+[target.aarch64-linux-android]
+linker = "/home/president/Android/Sdk/ndk/29.0.14206865/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android30-clang"
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.armv7-linux-androideabi]
+linker = "/home/president/Android/Sdk/ndk/29.0.14206865/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi30-clang"
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.x86_64-linux-android]
+linker = "/home/president/Android/Sdk/ndk/29.0.14206865/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android30-clang"
+rustflags = ["-C", "target-feature=+crt-static"]
