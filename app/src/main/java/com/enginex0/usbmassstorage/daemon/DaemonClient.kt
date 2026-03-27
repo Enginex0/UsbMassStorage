@@ -22,6 +22,7 @@ class DaemonClient : Closeable {
             socket.connect(
                 LocalSocketAddress(MsdProtocol.SOCKET_NAME, LocalSocketAddress.Namespace.ABSTRACT)
             )
+            socket.soTimeout = 5_000
             Log.d(TAG, "Connected, starting version handshake")
             handshake()
             Log.d(TAG, "Handshake complete")
