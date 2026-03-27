@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -6,6 +8,7 @@ plugins {
 
 val moduleProp = rootProject.file("module/module.prop")
     .readLines()
+    .filter { it.contains("=") }
     .associate { line ->
         val (k, v) = line.split("=", limit = 2)
         k.trim() to v.trim()
@@ -19,7 +22,7 @@ android {
         create("release") {
             val props = rootProject.file("local.properties")
                 .takeIf { it.exists() }
-                ?.inputStream()?.use { java.util.Properties().apply { load(it) } }
+                ?.inputStream()?.use { stream -> Properties().also { it.load(stream) } }
 
             storeFile = file("../release.jks")
             storePassword = System.getenv("KEYSTORE_PASSWORD")
