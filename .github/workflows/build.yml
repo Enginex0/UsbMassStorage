@@ -14,6 +14,12 @@ on:
       - '.github/workflows/build.yml'
   pull_request:
     branches: [master]
+    paths:
+      - 'app/**'
+      - 'gradle/**'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle.properties'
   workflow_dispatch:
 
 jobs:
@@ -34,14 +40,15 @@ jobs:
 
       - name: Build APK (${{ matrix.profile }})
         run: |
-          if [ "${{ matrix.profile }}" = "release" ]; then
+          if [ "$PROFILE" = "release" ]; then
             ./gradlew assembleRelease
           else
             ./gradlew assembleDebug
           fi
+        env:
+          PROFILE: ${{ matrix.profile }}
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: apk-${{ matrix.profile }}
           path: app/build/outputs/apk/${{ matrix.profile }}/app-${{ matrix.profile }}.apk
@@ -50,39 +57,39 @@ jobs:
   package:
     needs: build
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        profile: [debug, release]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download APK
+      - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
-          name: apk-${{ matrix.profile }}
-          path: apk/
+          path: artifacts
 
       - name: Read version
         id: ver
         run: echo "version=$(grep '^version=' module/module.prop | cut -d= -f2)" >> "$GITHUB_OUTPUT"
 
-      - name: Package module ZIP
-        run: |
-          bash scripts/package.sh --apk=apk/app-${{ matrix.profile }}.apk
-
-      - name: Rename ZIP for profile
+      - name: Package ZIPs
         run: |
           ver="${{ steps.ver.outputs.version }}"
-          src="out/UsbMassStorage-${ver}.zip"
-          if [ "${{ matrix.profile }}" = "debug" ]; then
-            mv "$src" "out/UsbMassStorage-${ver}-debug.zip"
-          fi
+          mkdir -p out/release out/debug
 
-      - name: Upload module ZIP
-        uses: actions/upload-artifact@v4
+          bash scripts/package.sh --apk="artifacts/apk-release/app-release.apk"
+          mv "out/UsbMassStorage-${ver}.zip" "out/release/"
+
+          bash scripts/package.sh --apk="artifacts/apk-debug/app-debug.apk"
+          mv "out/UsbMassStorage-${ver}.zip" "out/debug/UsbMassStorage-${ver}-debug.zip"
+
+      - uses: actions/upload-artifact@v4
         with:
-          name: module-${{ matrix.profile }}
-          path: out/UsbMassStorage-*.zip
+          name: usbmassstorage-release-zip
+          path: out/release/*.zip
+          retention-days: 30
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: usbmassstorage-debug-zip
+          path: out/debug/*.zip
           retention-days: 30
 
   release:
@@ -98,41 +105,33 @@ jobs:
         id: ver
         run: echo "version=$(grep '^version=' module/module.prop | cut -d= -f2)" >> "$GITHUB_OUTPUT"
 
-      - name: Download release ZIP
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: module-release
-          path: zips/release/
+          name: usbmassstorage-release-zip
+          path: zips/release
 
-      - name: Download debug ZIP
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: module-debug
-          path: zips/debug/
+          name: usbmassstorage-debug-zip
+          path: zips/debug
 
       - name: Extract changelog
-        id: notes
         run: |
-          ver="${{ steps.ver.outputs.version }}"
-          if [ -f CHANGELOG.md ]; then
-            awk "/^## ${ver}/{flag=1; next} /^## v/{if(flag) exit} flag" CHANGELOG.md > /tmp/notes.md
-          fi
-          if [ ! -s /tmp/notes.md ]; then
-            echo "Release ${ver}" > /tmp/notes.md
-          fi
-
-      - name: Delete old release
-        run: gh release delete "${{ steps.ver.outputs.version }}" --yes 2>/dev/null || true
+          ver="${VER}"
+          awk "/^## ${ver}/{flag=1; next} /^## v/{if(flag) exit} flag" CHANGELOG.md > /tmp/notes.md
+          cat /tmp/notes.md
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VER: ${{ steps.ver.outputs.version }}
 
       - name: Create release
         run: |
-          gh release create "${{ steps.ver.outputs.version }}" \
-            --title "${{ steps.ver.outputs.version }}" \
-            --notes-file /tmp/notes.md \
+          gh release delete "$VER" --yes 2>/dev/null || true
+          gh release create "$VER" \
+            --title "$VER" \
             --latest \
+            --notes-file /tmp/notes.md \
             zips/release/*.zip \
             zips/debug/*.zip
         env:
+          VER: ${{ steps.ver.outputs.version }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
