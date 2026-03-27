@@ -74,7 +74,10 @@ class DeviceStore(context: Context) {
         }
 
         val cmds = mutableListOf(": > $AUTOMOUNT_PATH")
-        lines.forEach { cmds.add("echo '$it' >> $AUTOMOUNT_PATH") }
+        lines.forEach {
+            val escaped = it.replace("'", "'\\''")
+            cmds.add("printf '%s\\n' '$escaped' >> $AUTOMOUNT_PATH")
+        }
         Shell.cmd(*cmds.toTypedArray()).exec()
         Log.d(TAG, "writeAutomountConfig: ${lines.size} entries")
     }
