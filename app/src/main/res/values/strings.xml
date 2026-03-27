@@ -65,6 +65,7 @@
 
     <string name="settings_daemon_status">Daemon Status</string>
     <string name="settings_restart_daemon">Restart Daemon</string>
+    <string name="settings_stop_daemon">Stop Daemon</string>
     <string name="settings_app_info">App Info</string>
     <string name="settings_version">Version: %s</string>
     <string name="settings_version_debug"> (debug)</string>
@@ -103,6 +104,8 @@
     <string name="format_exfat">exFAT</string>
     <string name="format_none">None (Raw)</string>
     <string name="settings_default_format">Default Format</string>
+    <string name="settings_bg_opacity">Background Opacity</string>
+    <string name="settings_bg_opacity_value">%d%%</string>
     <string name="device_label_format">Format</string>
     <string name="eject_confirm_title">Eject Device?</string>
     <string name="eject_confirm_message">Unmount \"%s\" from USB? The computer will lose access to this drive.</string>

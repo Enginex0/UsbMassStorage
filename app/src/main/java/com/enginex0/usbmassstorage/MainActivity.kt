@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -16,6 +17,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.enginex0.usbmassstorage.data.AccentColor
 import com.enginex0.usbmassstorage.data.AccentPreference
@@ -55,12 +57,19 @@ private fun UsbMassStorageApp(
 
     var showAddSheet by remember { mutableStateOf(false) }
     var editDeviceIndex by remember { mutableIntStateOf(-1) }
+    var bgIndex by remember { mutableIntStateOf(0) }
+
+    val navEntry by navController.currentBackStackEntryAsState()
+    LaunchedEffect(navEntry) {
+        if (navEntry?.destination?.route == "devices") bgIndex++
+    }
 
     if (state.mounting) showAddSheet = false
 
     NavHost(navController = navController, startDestination = "devices") {
         composable("devices") {
             DeviceListScreen(
+                bgIndex = bgIndex,
                 state = state,
                 onRefresh = { vm.refresh() },
                 onAddDevice = { showAddSheet = true },
@@ -75,6 +84,7 @@ private fun UsbMassStorageApp(
             SettingsScreen(
                 state = state,
                 onRestartDaemon = { vm.restartDaemon() },
+                onStopDaemon = { vm.stopDaemon() },
                 onBack = { navController.popBackStack() },
                 onAccentChanged = onAccentChanged
             )

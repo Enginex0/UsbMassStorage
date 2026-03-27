@@ -7,6 +7,13 @@ import android.content.Intent
 import android.net.Uri
 import android.util.Log
 import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -20,8 +27,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,6 +38,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -60,6 +70,8 @@ import com.enginex0.usbmassstorage.data.AccentPreference
 import com.enginex0.usbmassstorage.data.FileSystemType
 import com.enginex0.usbmassstorage.data.FormatPreference
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Slider
+import com.enginex0.usbmassstorage.data.BackgroundPreference
 import com.enginex0.usbmassstorage.viewmodel.UiState
 import com.topjohnwu.superuser.Shell
 
@@ -72,6 +84,7 @@ private const val KEY_DEBUG = "debug_mode"
 fun SettingsScreen(
     state: UiState,
     onRestartDaemon: () -> Unit,
+    onStopDaemon: () -> Unit = {},
     onBack: () -> Unit,
     onAccentChanged: (AccentColor) -> Unit = {}
 ) {
@@ -95,12 +108,13 @@ fun SettingsScreen(
             )
         }
     ) { padding ->
+        val scrollState = rememberScrollState()
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
                 .padding(16.dp)
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(scrollState),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Card(
@@ -137,14 +151,25 @@ fun SettingsScreen(
                 }
             }
 
-            Button(
-                onClick = {
-                    Log.d(TAG, "Settings: restart daemon clicked")
-                    onRestartDaemon()
-                },
-                modifier = Modifier.fillMaxWidth()
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(stringResource(R.string.settings_restart_daemon))
+                Button(
+                    onClick = onRestartDaemon,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(stringResource(R.string.settings_restart_daemon))
+                }
+                Button(
+                    onClick = onStopDaemon,
+                    modifier = Modifier.weight(1f),
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text(stringResource(R.string.settings_stop_daemon))
+                }
             }
 
             Card(
@@ -181,6 +206,8 @@ fun SettingsScreen(
             AccentColorCard(context, onAccentChanged)
 
             DefaultFormatCard(context)
+
+            BackgroundOpacityCard(context)
 
             Text(stringResource(R.string.settings_debug_title), style = MaterialTheme.typography.titleMedium)
 
@@ -249,6 +276,34 @@ fun SettingsScreen(
                     }
                 }
             }
+        }
+
+        AnimatedVisibility(
+            visible = scrollState.value == 0 && scrollState.maxValue > 0,
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp)
+        ) {
+            val bounce = rememberInfiniteTransition(label = "scroll")
+            val offsetY by bounce.animateFloat(
+                initialValue = 0f,
+                targetValue = 8f,
+                animationSpec = infiniteRepeatable(tween(600), RepeatMode.Reverse),
+                label = "chevron"
+            )
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    "Scroll for more",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                )
+                Icon(
+                    Icons.Filled.KeyboardArrowDown,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(28.dp).offset(y = offsetY.dp)
+                )
+            }
+        }
         }
     }
 }
@@ -366,6 +421,37 @@ private fun DefaultFormatCard(context: Context) {
                     label = { Text(stringResource(R.string.format_none)) }
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun BackgroundOpacityCard(context: Context) {
+    var opacity by remember { mutableStateOf(BackgroundPreference.load(context)) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(stringResource(R.string.settings_bg_opacity), style = MaterialTheme.typography.titleMedium)
+                Text(
+                    stringResource(R.string.settings_bg_opacity_value, (opacity * 100).toInt()),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+            Slider(
+                value = opacity,
+                onValueChange = { opacity = it },
+                onValueChangeFinished = { BackgroundPreference.save(context, opacity) },
+                valueRange = 0f..1f,
+                steps = 19
+            )
         }
     }
 }

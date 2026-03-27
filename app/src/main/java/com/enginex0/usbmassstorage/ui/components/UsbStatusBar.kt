@@ -67,8 +67,8 @@ private fun StatusRow(
     activeDescription: String,
     inactiveDescription: String
 ) {
-    val bg = if (active) MaterialTheme.colorScheme.primaryContainer
-             else MaterialTheme.colorScheme.errorContainer
+    val bg = if (active) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 1f)
+             else MaterialTheme.colorScheme.errorContainer.copy(alpha = 1f)
     val fg = if (active) MaterialTheme.colorScheme.onPrimaryContainer
              else MaterialTheme.colorScheme.onErrorContainer
 
@@ -76,6 +76,7 @@ private fun StatusRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surface)
             .background(bg)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,

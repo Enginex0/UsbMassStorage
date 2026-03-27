@@ -1,6 +1,7 @@
 package com.enginex0.usbmassstorage.ui
 
 import android.util.Log
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,6 +11,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.MoreVert
@@ -21,6 +27,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -42,11 +49,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import com.enginex0.usbmassstorage.R
+import com.enginex0.usbmassstorage.data.BackgroundPreference
 import com.enginex0.usbmassstorage.ui.components.DeviceCard
 import com.enginex0.usbmassstorage.ui.components.UsbStatusBar
 import com.enginex0.usbmassstorage.viewmodel.UiState
@@ -57,6 +73,7 @@ private const val TAG = "UsbMsUI"
 @Composable
 fun DeviceListScreen(
     state: UiState,
+    bgIndex: Int = 0,
     onRefresh: () -> Unit,
     onAddDevice: () -> Unit,
     onSettings: () -> Unit,
@@ -66,6 +83,8 @@ fun DeviceListScreen(
     onAcknowledgeAlert: () -> Unit = {}
 ) {
     Log.d(TAG, "DeviceListScreen: composed, connected=${state.connected}, devices=${state.activeDevices.size}")
+    val bgOpacity = BackgroundPreference.load(LocalContext.current)
+    val bgRes = if (bgIndex % 2 == 0) R.drawable.bg_1 else R.drawable.bg_2
     var menuExpanded by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
     var showAlertDetail by remember { mutableStateOf<String?>(null) }
@@ -109,7 +128,16 @@ fun DeviceListScreen(
         )
     }
 
+    Box(modifier = Modifier.fillMaxSize()) {
+        Image(
+            painter = painterResource(bgRes),
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize().alpha(bgOpacity),
+            contentScale = ContentScale.Crop
+        )
+
     Scaffold(
+        containerColor = Color.Transparent,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
@@ -160,11 +188,24 @@ fun DeviceListScreen(
         },
         floatingActionButton = {
             if (state.connected) {
+                val haptic = LocalHapticFeedback.current
+                val bounce = rememberInfiniteTransition(label = "fab")
+                val scale by bounce.animateFloat(
+                    initialValue = 1f,
+                    targetValue = 1.12f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(800),
+                        repeatMode = RepeatMode.Reverse
+                    ),
+                    label = "fab_scale"
+                )
                 FloatingActionButton(
                     onClick = {
-                        Log.d(TAG, "DeviceListScreen: FAB clicked")
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         onAddDevice()
-                    }
+                    },
+                    modifier = Modifier.scale(scale),
+                    elevation = FloatingActionButtonDefaults.elevation(8.dp)
                 ) {
                     Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.add_device_fab))
                 }
@@ -227,7 +268,7 @@ fun DeviceListScreen(
                             Text(
                                 text = stringResource(R.string.no_devices_mounted),
                                 style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
                             )
                         }
                     }
@@ -257,5 +298,6 @@ fun DeviceListScreen(
                 }
             }
         }
+    }
     }
 }

@@ -318,6 +318,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun stopDaemon() {
+        viewModelScope.launch {
+            Log.d(TAG, "stopDaemon: hard kill")
+            reconnectJob?.cancel()
+            reconnectJob = null
+
+            withContext(Dispatchers.IO) {
+                synchronized(daemonLock) {
+                    client?.close()
+                    client = null
+                }
+                Shell.cmd(
+                    "DPID=\$(pidof daemon);" +
+                    "[ -n \"\$DPID\" ] && kill \$(awk '{print \$4}' /proc/\$DPID/stat 2>/dev/null) 2>/dev/null;" +
+                    "pkill -f '/bin/.*/daemon' 2>/dev/null;" +
+                    "rm -f /dev/usbms_svc_lock"
+                ).exec()
+            }
+
+            store.clear()
+            _uiState.update {
+                it.copy(
+                    connected = false,
+                    connecting = false,
+                    daemonRunning = false,
+                    activeDevices = emptyList(),
+                    savedDevices = emptyList()
+                )
+            }
+        }
+    }
+
     fun checkDaemonStatus(): Boolean {
         val result = Shell.cmd("pidof daemon").exec()
         val running = result.isSuccess && result.out.isNotEmpty()
