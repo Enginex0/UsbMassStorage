@@ -1,7 +1,7 @@
 id=usbmassstorage
 name=USB Mass Storage
-version=v3.1
-versionCode=310
+version=v4.0
+versionCode=400
 author=Enginex0
 description=💾 USB Mass Storage gadget controller · Turn your phone into a USB drive · KernelSU / Magisk / APatch
 banner=banner.png
