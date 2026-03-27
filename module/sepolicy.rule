@@ -1,3 +1,56 @@
 type msd_daemon
 typeattribute msd_daemon domain
 typeattribute msd_daemon mlstrustedsubject
+
+allow msd_daemon msd_daemon process { fork sigchld sigkill sigstop signull signal getsched setsched }
+allow msd_daemon msd_daemon process { getsession getpgid setpgid getcap setcap getattr setrlimit }
+allow msd_daemon msd_daemon fd use
+allow msd_daemon msd_daemon fifo_file { read write ioctl lock append getattr setattr open }
+allow msd_daemon msd_daemon file { read write ioctl lock append getattr setattr open }
+allow msd_daemon msd_daemon dir { read getattr search open }
+allow msd_daemon msd_daemon lnk_file { read getattr open }
+allow msd_daemon msd_daemon unix_dgram_socket { create read write ioctl bind sendto connect }
+allow msd_daemon msd_daemon unix_dgram_socket { listen accept getopt setopt getattr setattr shutdown }
+allow msd_daemon msd_daemon unix_stream_socket { create read write ioctl bind listen accept connect }
+allow msd_daemon msd_daemon unix_stream_socket { sendto recvfrom getopt setopt getattr setattr shutdown }
+
+allow su msd_daemon process { transition rlimitinh siginh }
+allow init msd_daemon process { transition rlimitinh siginh }
+deny init msd_daemon process noatsecure
+allow msd_daemon system_file file { entrypoint execute map read }
+
+allow msd_daemon msd_daemon capability { chown setgid setuid }
+allow msd_daemon selinuxfs file { open read }
+
+allow msd_daemon hal_usb_gadget_impl dir search
+deny msd_daemon domain file read
+allow msd_daemon hal_usb_gadget_impl file read
+allow msd_daemon hal_usb_gadget_impl lnk_file read
+allow msd_daemon hal_usb_gadget_impl process { sigstop signal }
+
+allow msd_daemon configfs dir { add_name create open read remove_name rmdir search setattr write }
+allow msd_daemon configfs file { create getattr open read setattr write }
+allow msd_daemon configfs lnk_file { create read setattr unlink }
+
+allow msd_daemon storage_config_prop file { getattr map open read }
+allow msd_daemon usb_control_prop file { getattr map open read }
+
+allow msd_daemon mediaprovider fd use
+allow msd_daemon platform_app fd use
+allow msd_daemon mediaprovider_app fd use
+allow msd_daemon fuse file { getattr read open write }
+allow kernel msd_daemon fd use
+
+deny msd_daemon msd_daemon unix_stream_socket connectto
+allow untrusted_app msd_daemon unix_stream_socket connectto
+
+allow msd_daemon shell_data_file file { write append open getattr }
+allow msd_daemon shell_data_file dir { search write add_name }
+
+allow msd_daemon usb_configfs dir { add_name create open read remove_name rmdir search setattr write }
+allow msd_daemon usb_configfs file { create getattr open read setattr write }
+allow msd_daemon usb_configfs lnk_file { create read setattr unlink }
+allow msd_daemon sdcardfs file { getattr read open write }
+allow msd_daemon media_rw_data_file file { getattr read open write }
+allow msd_daemon vfat file { getattr read open write }
+allow msd_daemon exfat file { getattr read open write }
