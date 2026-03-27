@@ -23,6 +23,8 @@ No file transfer protocols, no MTP, no ADB. The computer sees a native block dev
 
 > **This is not MTP or file transfer.** USB Mass Storage exposes raw block devices to the host computer through the kernel's USB gadget ConfigFS interface. The computer sees a real disk, not a file-sharing protocol. You can boot from it, format it, or use it exactly like a physical USB drive.
 
+> **Who benefits?** The computer you plug into. Your phone acts as the hardware (like a USB stick), and any PC, Mac, or Linux machine sees a native USB disk. No drivers, no MTP, no special software needed on the computer side.
+
 ---
 
 ## 🔥 Why USB Mass Storage?

@@ -129,7 +129,7 @@
     <string name="alert_invalid_file">Selected file is not a regular file</string>
 
     <string name="guide_what_title">What This App Does</string>
-    <string name="guide_what_body">Turns your phone into a USB drive. When connected to a computer via USB, the computer sees a disk image on your phone as a real USB storage device. Create pre-formatted images that work instantly, or mount existing .img and .iso files.</string>
+    <string name="guide_what_body">Turns your phone into a USB drive. When connected to a computer via USB, the computer sees a disk image on your phone as a real USB storage device. Create pre-formatted images that work instantly, or mount existing .img and .iso files.\n\nThe benefit is on the computer side: your phone acts as the hardware, and any PC you plug into sees a real USB disk. No drivers, no MTP, no special software needed on the computer.</string>
     <string name="guide_before_title">Before You Start</string>
     <string name="guide_before_1">Root access required (KernelSU, Magisk, or APatch)</string>
     <string name="guide_before_2">Grant root permission to this app in your root manager</string>

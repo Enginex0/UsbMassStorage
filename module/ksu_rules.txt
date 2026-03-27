@@ -1,3 +1,6 @@
+# Type attributes (belt-and-suspenders with sepolicy.rule for KSU compatibility)
+typeattribute msd_daemon mlstrustedsubject
+
 # Daemon self-rules
 allow msd_daemon msd_daemon process { fork sigchld sigkill sigstop signull signal getsched setsched }
 allow msd_daemon msd_daemon process { getsession getpgid setpgid getcap setcap getattr setrlimit }
