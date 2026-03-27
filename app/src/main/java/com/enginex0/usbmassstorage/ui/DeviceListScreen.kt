@@ -247,6 +247,7 @@ fun DeviceListScreen(
                             itemsIndexed(state.activeDevices) { index, device ->
                                 DeviceCard(
                                     device = device,
+                                    index = index,
                                     onEject = { onEjectDevice(index) },
                                     onClick = { onDeviceClick(index) }
                                 )

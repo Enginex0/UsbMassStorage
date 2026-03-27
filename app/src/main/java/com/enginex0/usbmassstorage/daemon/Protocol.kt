@@ -75,7 +75,7 @@ fun OutputStream.writeLengthPrefixedString(s: String) {
 
 data class UsbFunction(val config: String, val function: String)
 
-data class ActiveDevice(val file: String, val cdrom: Boolean, val ro: Boolean)
+data class ActiveDevice(val file: String, val cdrom: Boolean, val ro: Boolean, val size: Long = -1, val fsType: String? = null)
 
 enum class DeviceType {
     DISK_RW,
@@ -83,4 +83,4 @@ enum class DeviceType {
     CDROM,
 }
 
-data class DeviceInfo(val uri: Uri, val type: DeviceType)
+data class DeviceInfo(val uri: Uri, val type: DeviceType, val fsType: String? = null)

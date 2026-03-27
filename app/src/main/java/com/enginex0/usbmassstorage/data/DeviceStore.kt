@@ -28,7 +28,8 @@ class DeviceStore(context: Context) {
                 Log.w(TAG, "load: unknown type $typeName at index $i, skipping")
                 continue
             }
-            devices.add(DeviceInfo(Uri.parse(uri), type))
+            val fs = prefs.getString("device_${i}_fs", null)
+            devices.add(DeviceInfo(Uri.parse(uri), type, fs))
         }
         Log.d(TAG, "load: ${devices.size} saved devices")
         return devices
@@ -41,6 +42,7 @@ class DeviceStore(context: Context) {
             devices.forEachIndexed { i, device ->
                 putString("device_${i}_uri", device.uri.toString())
                 putString("device_${i}_type", device.type.name)
+                device.fsType?.let { putString("device_${i}_fs", it) }
             }
             apply()
         }

@@ -19,3 +19,4 @@ out/
 .env
 *.pem
 *.key
+/target/

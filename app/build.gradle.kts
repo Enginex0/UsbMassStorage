@@ -4,6 +4,13 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+val moduleProp = rootProject.file("module/module.prop")
+    .readLines()
+    .associate { line ->
+        val (k, v) = line.split("=", limit = 2)
+        k.trim() to v.trim()
+    }
+
 android {
     namespace = "com.enginex0.usbmassstorage"
     compileSdk = 35
@@ -21,8 +28,8 @@ android {
         applicationId = "com.enginex0.usbmassstorage"
         minSdk = 30
         targetSdk = 35
-        versionCode = 310
-        versionName = "3.1.0"
+        versionCode = moduleProp["versionCode"]!!.toInt()
+        versionName = moduleProp["version"]!!.removePrefix("v")
 
         buildConfigField("String", "PROJECT_URL", "\"https://github.com/enginex0/UsbMassStorage\"")
     }

@@ -88,7 +88,9 @@ private fun UsbMassStorageApp(
         AddDeviceSheet(
             mounting = state.mounting,
             onMount = { deviceInfo ->
-                vm.takePersistablePermission(context, deviceInfo.uri)
+                if (deviceInfo.uri.scheme != "file") {
+                    vm.takePersistablePermission(context, deviceInfo.uri)
+                }
                 vm.addDevice(context, deviceInfo)
             },
             onDismiss = { showAddSheet = false }

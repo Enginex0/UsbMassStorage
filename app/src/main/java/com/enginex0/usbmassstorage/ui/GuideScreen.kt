@@ -74,6 +74,8 @@ fun GuideScreen(onBack: () -> Unit) {
             item { Step(1, stringResource(R.string.guide_create_1)) }
             item { Step(2, stringResource(R.string.guide_create_2)) }
             item { Step(3, stringResource(R.string.guide_create_3)) }
+            item { Step(4, stringResource(R.string.guide_create_4)) }
+            item { Step(5, stringResource(R.string.guide_create_5)) }
 
             item { Spacer(Modifier.height(8.dp)) }
             item { SectionTitle(stringResource(R.string.guide_multi_title)) }

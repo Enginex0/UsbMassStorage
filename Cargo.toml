@@ -1,0 +1,11 @@
+[workspace]
+default-members = ["daemon"]
+members = ["daemon"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+license = "GPL-3.0-only"
+edition = "2024"
+repository = "https://github.com/Enginex0/UsbMassStorage"
+publish = false

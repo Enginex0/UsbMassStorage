@@ -15,6 +15,7 @@ import com.enginex0.usbmassstorage.daemon.DeviceInfo
 import com.enginex0.usbmassstorage.daemon.DeviceType
 import com.enginex0.usbmassstorage.daemon.UsbFunction
 import com.enginex0.usbmassstorage.data.DeviceStore
+import com.enginex0.usbmassstorage.util.formatted
 import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -98,13 +99,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         connecting = false,
                         rootGranted = hasRoot,
                         functions = functions,
-                        activeDevices = devices,
+                        activeDevices = enrichWithSize(devices),
                         daemonRunning = true
                     )
                 }
                 Log.d(TAG, "refresh: connected, ${functions.size} functions, ${devices.size} devices")
                 reconnectJob?.cancel()
                 reconnectJob = null
+
+                val saved = _uiState.value.savedDevices
+                if (devices.isEmpty() && saved.isNotEmpty()) {
+                    Log.d(TAG, "refresh: auto-remounting ${saved.size} saved devices")
+                    setMassStorage(getApplication(), saved)
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "refresh: connection failed", e)
                 client = null
@@ -135,11 +142,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                     try {
                         for (info in devices) {
+                            val mode = if (info.type == DeviceType.DISK_RW) "rw" else "r"
                             val pfd = if (info.uri.scheme == "file") {
                                 val file = java.io.File(info.uri.path!!)
-                                ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+                                val flags = if (info.type == DeviceType.DISK_RW)
+                                    ParcelFileDescriptor.MODE_READ_WRITE
+                                else ParcelFileDescriptor.MODE_READ_ONLY
+                                ParcelFileDescriptor.open(file, flags)
                             } else {
-                                context.contentResolver.openFileDescriptor(info.uri, "r")
+                                context.contentResolver.openFileDescriptor(info.uri, mode)
                                     ?: throw IllegalStateException("Failed to open FD for ${info.uri}")
                             }
                             pfds.add(pfd)
@@ -149,7 +160,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             fdPairs.add(pfd.fileDescriptor to info.type)
                         }
 
-                        val c = client ?: throw IllegalStateException("Not connected to daemon")
+                        var c = client
+                        if (c == null) {
+                            Log.d(TAG, "setMassStorage: reconnecting to daemon")
+                            c = DaemonClient()
+                            client = c
+                        }
                         c.setMassStorage(fdPairs)
                     } finally {
                         pfds.forEach { pfd ->
@@ -162,6 +178,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 store.save(devices)
                 _uiState.update { it.copy(savedDevices = devices) }
                 refreshDevices()
+
+                if (_uiState.value.activeDevices.isEmpty() && devices.isNotEmpty()) {
+                    Log.d(TAG, "setMassStorage: daemon returned 0 devices, retrying after delay")
+                    delay(500)
+                    refreshDevices()
+                }
+
+                if (_uiState.value.activeDevices.isEmpty() && devices.isNotEmpty()) {
+                    val synthetic = devices.map { info ->
+                        ActiveDevice(
+                            file = info.uri.formatted,
+                            cdrom = info.type == DeviceType.CDROM,
+                            ro = info.type != DeviceType.DISK_RW
+                        )
+                    }
+                    _uiState.update { it.copy(activeDevices = synthetic) }
+                    Log.w(TAG, "setMassStorage: using ${synthetic.size} synthetic devices as fallback")
+                }
+
                 _uiState.update { it.copy(mounting = false) }
             } catch (e: AppFuseException) {
                 Log.e(TAG, "setMassStorage: AppFuse file rejected", e)
@@ -194,7 +229,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             try {
                 withContext(Dispatchers.IO) {
-                    val c = client ?: throw IllegalStateException("Not connected to daemon")
+                    var c = client
+                    if (c == null) {
+                        Log.d(TAG, "clearDevices: reconnecting to daemon")
+                        c = DaemonClient()
+                        client = c
+                    }
                     c.setMassStorage(emptyList())
                 }
                 Log.d(TAG, "clearDevices: success")
@@ -369,14 +409,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         try {
             val devices = withContext(Dispatchers.IO) {
                 val c = client ?: return@withContext emptyList()
-                c.getMassStorage()
+                enrichWithSize(c.getMassStorage())
             }
             _uiState.update { it.copy(activeDevices = devices) }
             Log.d(TAG, "refreshDevices: ${devices.size} active devices")
+        } catch (e: java.io.IOException) {
+            // Daemon closed connection after SetMassStorage, reconnect
+            Log.w(TAG, "refreshDevices: connection lost, reconnecting")
+            client?.close()
+            client = null
+            try {
+                val (c, devices) = withContext(Dispatchers.IO) {
+                    val c = DaemonClient()
+                    val d = enrichWithSize(c.getMassStorage())
+                    c to d
+                }
+                client = c
+                _uiState.update { it.copy(activeDevices = devices) }
+                Log.d(TAG, "refreshDevices: reconnected, ${devices.size} active devices")
+            } catch (e2: Exception) {
+                Log.e(TAG, "refreshDevices: reconnect failed", e2)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "refreshDevices: failed", e)
         }
     }
+
+    private fun enrichWithSize(devices: List<ActiveDevice>): List<ActiveDevice> =
+        devices.map { dev ->
+            val size = try { java.io.File(dev.file).length() } catch (_: Exception) { -1L }
+            val fs = try {
+                val r = Shell.cmd("blkid -s TYPE -o value '${dev.file}'").exec()
+                if (r.isSuccess && r.out.isNotEmpty()) r.out[0].trim().uppercase() else null
+            } catch (_: Exception) { null }
+            dev.copy(size = size, fsType = fs)
+        }
 
     override fun onCleared() {
         super.onCleared()

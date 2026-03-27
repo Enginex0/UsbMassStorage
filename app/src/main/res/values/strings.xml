@@ -54,6 +54,15 @@
     <string name="device_type_readonly">Read-Only Disk</string>
     <string name="device_type_readwrite">Read-Write Disk</string>
 
+    <string name="device_label_path">Path</string>
+    <string name="device_label_dir">Directory</string>
+    <string name="device_label_type">Type</string>
+    <string name="device_label_access">Access</string>
+    <string name="device_label_size">Size</string>
+    <string name="device_label_lun">LUN</string>
+    <string name="device_access_rw">Read-Write</string>
+    <string name="device_access_ro">Read-Only</string>
+
     <string name="settings_daemon_status">Daemon Status</string>
     <string name="settings_restart_daemon">Restart Daemon</string>
     <string name="settings_app_info">App Info</string>
@@ -83,12 +92,26 @@
     <string name="create_image_invalid_size">Invalid size format</string>
     <string name="create_image_filename_required">Filename required</string>
     <string name="create_image_invalid">Invalid size</string>
+    <string name="create_image_format">Format Type</string>
+    <string name="create_image_pick_size">Image Size</string>
+    <string name="create_image_custom_size">Custom</string>
+    <string name="create_image_formatting">Formatting…</string>
+    <string name="create_image_creating">Creating…</string>
+    <string name="action_create_mount">Create &amp; Mount</string>
+
+    <string name="format_fat32">FAT32</string>
+    <string name="format_exfat">exFAT</string>
+    <string name="format_none">None (Raw)</string>
+    <string name="settings_default_format">Default Format</string>
+    <string name="device_label_format">Format</string>
+    <string name="eject_confirm_title">Eject Device?</string>
+    <string name="eject_confirm_message">Unmount \"%s\" from USB? The computer will lose access to this drive.</string>
 
     <string name="alert_not_local_file">File is not locally accessible (AppFuse proxy)</string>
     <string name="alert_invalid_file">Selected file is not a regular file</string>
 
     <string name="guide_what_title">What This App Does</string>
-    <string name="guide_what_body">Turns your phone into a USB drive. When connected to a computer via USB, the computer sees a disk image on your phone as a real USB storage device. You can mount .img files as USB sticks or .iso files as CD drives.</string>
+    <string name="guide_what_body">Turns your phone into a USB drive. When connected to a computer via USB, the computer sees a disk image on your phone as a real USB storage device. Create pre-formatted images that work instantly, or mount existing .img and .iso files.</string>
     <string name="guide_before_title">Before You Start</string>
     <string name="guide_before_1">Root access required (KernelSU, Magisk, or APatch)</string>
     <string name="guide_before_2">Grant root permission to this app in your root manager</string>
@@ -101,8 +124,10 @@
     <string name="guide_mount_5">To eject: tap the eject icon on the device card.</string>
     <string name="guide_create_title">Creating a New Image</string>
     <string name="guide_create_1">Tap +, then \"Create new disk image\"</string>
-    <string name="guide_create_2">Set filename and size (accepts MB, GB, GiB). Created instantly.</string>
-    <string name="guide_create_3">After mounting, format it from the computer (FAT32, exFAT, or NTFS).</string>
+    <string name="guide_create_2">Pick a size from the presets, or enter a custom size</string>
+    <string name="guide_create_3">Choose a format: FAT32 (recommended), exFAT (for large files), or None (raw)</string>
+    <string name="guide_create_4">Tap \"Create &amp; Mount\". The image is created, formatted, and mounted automatically.</string>
+    <string name="guide_create_5">The computer detects a ready-to-use USB drive within seconds. No manual formatting needed.</string>
     <string name="guide_multi_title">Multiple Devices</string>
     <string name="guide_multi_body">Mount up to 8 devices simultaneously. Each appears as a separate USB device on the computer. Tap a device card to change its type or remove it.</string>
     <string name="guide_issues_title">Common Issues</string>

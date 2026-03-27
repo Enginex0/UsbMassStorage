@@ -1,41 +1,75 @@
 package com.enginex0.usbmassstorage.ui
 
-import android.content.Intent
 import android.net.Uri
-import android.system.Os
 import android.util.Log
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuAnchorType
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.enginex0.usbmassstorage.R
+import com.enginex0.usbmassstorage.daemon.DeviceInfo
+import com.enginex0.usbmassstorage.daemon.DeviceType
+import com.enginex0.usbmassstorage.data.FileSystemType
+import com.enginex0.usbmassstorage.data.FormatPreference
+import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private const val TAG = "CreateImage"
+
+private val IMAGE_EXTENSIONS = listOf(".img", ".iso", ".bin", ".raw")
+
+private data class SizePreset(val label: String, val bytes: Long)
+
+private val SIZE_PRESETS = listOf(
+    SizePreset("256 MB", 256_000_000L),
+    SizePreset("512 MB", 512_000_000L),
+    SizePreset("1 GB", 1_000_000_000L),
+    SizePreset("2 GB", 2_000_000_000L),
+    SizePreset("4 GB", 4_000_000_000L),
+    SizePreset("8 GB", 8_000_000_000L),
+    SizePreset("16 GB", 16_000_000_000L),
+    SizePreset("32 GB", 32_000_000_000L),
+)
 
 private val SIZE_PATTERN = Regex(
     """^\s*(\d+(?:\.\d+)?)\s*(B|KB|MB|GB|KiB|MiB|GiB)?\s*$""",
@@ -60,115 +94,233 @@ private fun parseSize(input: String): Long? {
     return if (bytes > 0) bytes else null
 }
 
-private fun formatBytes(bytes: Long): String = when {
-    bytes >= 1_073_741_824L -> "%.2f GiB".format(bytes / 1_073_741_824.0)
-    bytes >= 1_048_576L -> "%.2f MiB".format(bytes / 1_048_576.0)
-    bytes >= 1_024L -> "%.2f KiB".format(bytes / 1_024.0)
-    else -> "$bytes B"
-}
-
 private fun sanitizeFilename(name: String): String =
     name.trim().replace(Regex("[^a-zA-Z0-9._-]"), "_")
 
+private fun formatBytes(bytes: Long): String = when {
+    bytes >= 1_000_000_000L -> "%.1f GB".format(bytes / 1_000_000_000.0)
+    bytes >= 1_000_000L -> "%.0f MB".format(bytes / 1_000_000.0)
+    else -> "$bytes B"
+}
+
+private const val MODULE_DIR = "/data/adb/modules/usbmassstorage"
+
+private suspend fun findBundledMkfs(): String? = withContext(Dispatchers.IO) {
+    val abis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+    abis.map { "$MODULE_DIR/bin/$it/mkfs.fat" }
+        .firstOrNull { Shell.cmd("[ -x '$it' ]").exec().isSuccess }
+}
+
+private suspend fun checkBinary(name: String): Boolean = withContext(Dispatchers.IO) {
+    Shell.cmd("which $name 2>/dev/null").exec().isSuccess
+}
+
+private suspend fun formatFat32(path: String) = withContext(Dispatchers.IO) {
+    val mkfs = findBundledMkfs()
+        ?: throw IllegalStateException("mkfs.fat not found in module. Reinstall the module.")
+    val fmt = Shell.cmd("$mkfs -F 32 -n USBDRIVE '$path'").exec()
+    if (!fmt.isSuccess) throw IllegalStateException("FAT32 format failed: ${fmt.err.joinToString()}")
+}
+
+private suspend fun formatExfat(path: String) = withContext(Dispatchers.IO) {
+    val fmt = Shell.cmd("mkfs.exfat '$path'").exec()
+    if (!fmt.isSuccess) throw IllegalStateException("exFAT format failed: ${fmt.err.joinToString()}")
+}
+
+private suspend fun createAndFormat(
+    baseDir: java.io.File,
+    filename: String,
+    sizeBytes: Long,
+    fsType: FileSystemType
+): String = withContext(Dispatchers.IO) {
+    val dir = java.io.File(baseDir, "images").apply { mkdirs() }
+    val file = java.io.File(dir, filename)
+    val path = file.absolutePath
+
+    java.io.RandomAccessFile(file, "rw").use { it.setLength(sizeBytes) }
+
+    try {
+        when (fsType) {
+            FileSystemType.FAT32 -> formatFat32(path)
+            FileSystemType.EXFAT -> formatExfat(path)
+            FileSystemType.NONE -> {}
+        }
+    } catch (e: Exception) {
+        file.delete()
+        throw e
+    }
+
+    path
+}
+
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun CreateImageDialog(
     onDismiss: () -> Unit,
-    onCreated: (Uri) -> Unit
+    onCreated: (DeviceInfo) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var filename by remember { mutableStateOf("disk.img") }
-    var sizeInput by remember { mutableStateOf("512 MB") }
+    var filename by remember { mutableStateOf("disk") }
+    var selectedExt by remember { mutableStateOf(".img") }
+    var extExpanded by remember { mutableStateOf(false) }
+    var selectedPresetIndex by remember { mutableStateOf(1) }
+    var customSize by remember { mutableStateOf("") }
+    var useCustom by remember { mutableStateOf(false) }
+    var selectedFormat by remember { mutableStateOf(FormatPreference.load(context)) }
     var creating by remember { mutableStateOf(false) }
+    var statusText by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
 
-    val parsedBytes = parseSize(sizeInput)
-    val suggestedName = sanitizeFilename(filename).ifEmpty { "disk.img" }
-    val filenameRequiredMsg = stringResource(R.string.create_image_filename_required)
-    val invalidSizeMsg = stringResource(R.string.create_image_invalid)
+    var hasVfat by remember { mutableStateOf(true) }
+    var hasExfat by remember { mutableStateOf(true) }
 
-    val createDocLauncher = rememberLauncherForActivityResult(
-        contract = object : ActivityResultContracts.CreateDocument("application/octet-stream") {
-            override fun createIntent(context: android.content.Context, input: String): Intent {
-                return super.createIntent(context, input).addFlags(
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
-                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
-                )
-            }
-        }
-    ) { uri ->
-        if (uri == null) {
-            creating = false
-            return@rememberLauncherForActivityResult
-        }
-        val sizeBytes = parsedBytes ?: run {
-            error = invalidSizeMsg
-            creating = false
-            return@rememberLauncherForActivityResult
-        }
-
-        scope.launch {
-            try {
-                withContext(Dispatchers.IO) {
-                    context.contentResolver.openFileDescriptor(uri, "rwt")?.use { pfd ->
-                        Os.ftruncate(pfd.fileDescriptor, sizeBytes)
-                    } ?: throw IllegalStateException("Failed to open file descriptor")
-                }
-
-                context.contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                )
-
-                Log.d(TAG, "Created image: $uri ($sizeBytes bytes)")
-                onCreated(uri)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to create image", e)
-                error = e.message ?: "Creation failed"
-                creating = false
-            }
+    LaunchedEffect(Unit) {
+        hasVfat = findBundledMkfs() != null
+        hasExfat = checkBinary("mkfs.exfat")
+        if (selectedFormat == FileSystemType.EXFAT && !hasExfat) {
+            selectedFormat = if (hasVfat) FileSystemType.FAT32 else FileSystemType.NONE
         }
     }
+
+    val sizeBytes = if (useCustom) parseSize(customSize) else SIZE_PRESETS[selectedPresetIndex].bytes
+    val filenameRequiredMsg = stringResource(R.string.create_image_filename_required)
+    val invalidSizeMsg = stringResource(R.string.create_image_invalid)
+    val creatingMsg = stringResource(R.string.create_image_creating)
+    val formattingMsg = stringResource(R.string.create_image_formatting)
 
     AlertDialog(
         onDismissRequest = { if (!creating) onDismiss() },
         title = { Text(stringResource(R.string.create_image_title)) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = filename,
-                    onValueChange = { filename = it },
-                    label = { Text(stringResource(R.string.create_image_filename)) },
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    OutlinedTextField(
+                        value = filename,
+                        onValueChange = { filename = it },
+                        label = { Text(stringResource(R.string.create_image_filename)) },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
 
-                OutlinedTextField(
-                    value = sizeInput,
-                    onValueChange = { sizeInput = it },
-                    label = { Text(stringResource(R.string.create_image_size)) },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
-                    supportingText = {
-                        val bytes = parsedBytes
-                        if (bytes != null) {
-                            Text(stringResource(R.string.create_image_size_display, formatBytes(bytes)))
-                        } else if (sizeInput.isNotBlank()) {
-                            Text(stringResource(R.string.create_image_invalid_size), color = MaterialTheme.colorScheme.error)
+                    ExposedDropdownMenuBox(
+                        expanded = extExpanded,
+                        onExpandedChange = { extExpanded = it },
+                        modifier = Modifier.width(110.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = selectedExt,
+                            onValueChange = {},
+                            readOnly = true,
+                            singleLine = true,
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(extExpanded) },
+                            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                        )
+                        ExposedDropdownMenu(
+                            expanded = extExpanded,
+                            onDismissRequest = { extExpanded = false }
+                        ) {
+                            IMAGE_EXTENSIONS.forEach { ext ->
+                                DropdownMenuItem(
+                                    text = { Text(ext) },
+                                    onClick = {
+                                        selectedExt = ext
+                                        extExpanded = false
+                                    }
+                                )
+                            }
                         }
                     }
-                )
+                }
+
+                Text(stringResource(R.string.create_image_pick_size), style = MaterialTheme.typography.labelLarge)
+
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    SIZE_PRESETS.forEachIndexed { index, preset ->
+                        FilterChip(
+                            selected = !useCustom && selectedPresetIndex == index,
+                            onClick = {
+                                useCustom = false
+                                selectedPresetIndex = index
+                            },
+                            label = { Text(preset.label) }
+                        )
+                    }
+                    FilterChip(
+                        selected = useCustom,
+                        onClick = { useCustom = true },
+                        label = { Text(stringResource(R.string.create_image_custom_size)) }
+                    )
+                }
+
+                if (useCustom) {
+                    OutlinedTextField(
+                        value = customSize,
+                        onValueChange = { customSize = it },
+                        label = { Text(stringResource(R.string.create_image_size)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                        supportingText = {
+                            val bytes = parseSize(customSize)
+                            if (bytes != null) {
+                                Text("= ${formatBytes(bytes)}")
+                            } else if (customSize.isNotBlank()) {
+                                Text(stringResource(R.string.create_image_invalid_size), color = MaterialTheme.colorScheme.error)
+                            }
+                        }
+                    )
+                }
+
+                Text(stringResource(R.string.create_image_format), style = MaterialTheme.typography.labelLarge)
+
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = selectedFormat == FileSystemType.FAT32,
+                        onClick = { selectedFormat = FileSystemType.FAT32 },
+                        enabled = hasVfat,
+                        label = {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Box(Modifier.size(6.dp).background(if (hasVfat) androidx.compose.ui.graphics.Color(0xFF4CAF50) else MaterialTheme.colorScheme.error, CircleShape))
+                                Text(stringResource(R.string.format_fat32))
+                            }
+                        }
+                    )
+                    FilterChip(
+                        selected = selectedFormat == FileSystemType.EXFAT,
+                        onClick = { selectedFormat = FileSystemType.EXFAT },
+                        enabled = hasExfat,
+                        label = {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Box(Modifier.size(6.dp).background(if (hasExfat) androidx.compose.ui.graphics.Color(0xFF4CAF50) else MaterialTheme.colorScheme.error, CircleShape))
+                                Text(stringResource(R.string.format_exfat))
+                            }
+                        }
+                    )
+                    FilterChip(
+                        selected = selectedFormat == FileSystemType.NONE,
+                        onClick = { selectedFormat = FileSystemType.NONE },
+                        label = { Text(stringResource(R.string.format_none)) }
+                    )
+                }
 
                 if (error != null) {
-                    Text(
-                        text = error ?: "",
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall
-                    )
+                    Text(error ?: "", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+
+                if (statusText != null) {
+                    Text(statusText ?: "", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         },
@@ -179,15 +331,37 @@ fun CreateImageDialog(
                         error = filenameRequiredMsg
                         return@Button
                     }
-                    if (parsedBytes == null) {
+                    if (sizeBytes == null) {
                         error = invalidSizeMsg
                         return@Button
                     }
                     error = null
                     creating = true
-                    createDocLauncher.launch(suggestedName)
+                    statusText = creatingMsg
+
+                    val safeName = sanitizeFilename(filename).ifEmpty { "disk" }
+                    val finalName = "$safeName$selectedExt"
+
+                    scope.launch {
+                        try {
+                            if (selectedFormat != FileSystemType.NONE) statusText = formattingMsg
+                            val path = createAndFormat(context.getExternalFilesDir(null)!!, finalName, sizeBytes, selectedFormat)
+                            val fsLabel = when (selectedFormat) {
+                                FileSystemType.FAT32 -> "VFAT"
+                                FileSystemType.EXFAT -> "EXFAT"
+                                FileSystemType.NONE -> null
+                            }
+                            Log.d(TAG, "Created: $path ($sizeBytes bytes, $selectedFormat)")
+                            onCreated(DeviceInfo(Uri.parse("file://$path"), DeviceType.DISK_RW, fsLabel))
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Create failed", e)
+                            error = e.message ?: "Creation failed"
+                            creating = false
+                            statusText = null
+                        }
+                    }
                 },
-                enabled = !creating
+                enabled = !creating && sizeBytes != null
             ) {
                 if (creating) {
                     CircularProgressIndicator(
@@ -195,7 +369,7 @@ fun CreateImageDialog(
                         strokeWidth = 2.dp
                     )
                 } else {
-                    Text(stringResource(R.string.action_create))
+                    Text(stringResource(R.string.action_create_mount))
                 }
             }
         },

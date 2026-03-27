@@ -182,17 +182,9 @@ fun AddDeviceSheet(
     if (showCreateDialog) {
         CreateImageDialog(
             onDismiss = { showCreateDialog = false },
-            onCreated = { uri ->
+            onCreated = { deviceInfo ->
                 showCreateDialog = false
-                selectedUri = uri
-                val cursor = context.contentResolver.query(uri, null, null, null, null)
-                cursor?.use {
-                    if (it.moveToFirst()) {
-                        val idx = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                        if (idx >= 0) selectedName = it.getString(idx)
-                    }
-                }
-                if (selectedName == null) selectedName = uri.lastPathSegment ?: "New image"
+                onMount(deviceInfo)
             }
         )
     }

@@ -1,0 +1,497 @@
+// SPDX-FileCopyrightText: 2024-2025 Andrew Gunnerson
+// SPDX-License-Identifier: GPL-3.0-only
+
+//! This module implements the daemon that runs as the system user and listens
+//! for requests from the app. The only actions possible are querying the
+//! currently active functions and setting the USB controller to emulate mass
+//! storage devices.
+//!
+//! Access control is handled entirely by the SELinux policy. If SELinux is not
+//! enforcing at the time of the connection, the connection will be terminated.
+//!
+//! Protocol violations terminate the connection. Only valid, but failed,
+//! requests result in an [`ErrorResponse`].
+
+use std::{
+    collections::BTreeMap,
+    ffi::{OsStr, OsString},
+    fs::{self, File},
+    io,
+    os::{
+        fd::{AsFd, AsRawFd},
+        unix::net::{SocketAddr, UnixListener, UnixStream},
+    },
+    path::Path,
+    sync::Mutex,
+    thread,
+};
+
+#[cfg(target_os = "android")]
+use std::os::android::net::SocketAddrExt;
+#[cfg(target_os = "linux")]
+use std::os::linux::net::SocketAddrExt;
+
+use anyhow::{Context, Result, anyhow, bail};
+use byteorder::{ReadBytesExt, WriteBytesExt};
+use clap::Parser;
+use rustix::{
+    fs::{FileType, Gid, Mode, Uid},
+    thread::{CapabilitySet, CapabilitySets},
+};
+use tracing::{debug, error, info, info_span, warn};
+
+use crate::{
+    message::{
+        self, ActiveMassStorageDevice, ErrorResponse, FromSocket, GetFunctionsResponse,
+        GetMassStorageResponse, Request, Response, SetMassStorageRequest, SetMassStorageResponse,
+        ToSocket,
+    },
+    usb::UsbGadget,
+    util::{self, ProcessIter, ProcessStopper},
+};
+
+const SELINUX_ENFORCE: &str = "/sys/fs/selinux/enforce";
+
+// AOSP hardcodes these.
+const GADGET_ROOT: &str = "/config/usb_gadget/g1";
+const CONFIGS_NAME: &str = "b.1";
+
+const FUNCTION_PREFIX: &str = "mass_storage.";
+const FUNCTION_NAME_DEFAULT: &str = "mass_storage.msd";
+const CONFIG_NAME: &str = "msd";
+
+const GADGET_HAL_PROCESS: &str = "android.hardware.usb.gadget-service";
+
+pub fn socket_addr() -> SocketAddr {
+    SocketAddr::from_abstract_name("msdd").expect("Invalid abstract socket name")
+}
+
+/// Check that SELinux is enabled, enforcing, and that the policy seems to be
+/// correct. This acts as a sanity check since we rely on SELinux for access
+/// control.
+fn check_selinux() -> Result<()> {
+    let path = Path::new(SELINUX_ENFORCE);
+
+    let mut file = File::open(path)
+        .and_then(|f| util::check_fs_magic(f, util::SELINUX_MAGIC))
+        .with_context(|| format!("Failed to open file: {path:?}"))?;
+
+    let value = file
+        .read_u8()
+        .with_context(|| format!("Failed to read file: {path:?}"))?;
+
+    if value != b'1' {
+        bail!("Denying connection because SELinux is not enforcing");
+    }
+
+    // Our policy denies connections to ourselves. Try it to test that the
+    // policy is actually loaded.
+    match UnixStream::connect_addr(&socket_addr()) {
+        Ok(_) => bail!("Denying connection because SELinux policy is broken"),
+        Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {}
+        Err(e) => return Err(e).context("Self connection failed for unexpected reason"),
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "android")]
+fn usb_controller() -> Result<Option<String>> {
+    const PROPERTY: &str = "sys.usb.controller";
+
+    system_properties::read(PROPERTY)
+        .with_context(|| format!("Failed to query property: {PROPERTY}"))
+}
+
+#[cfg(target_os = "linux")]
+fn usb_controller() -> Result<Option<String>> {
+    Ok(None)
+}
+
+#[cfg(target_os = "android")]
+fn is_sdcardfs() -> Result<bool> {
+    const PROPERTY: &str = "external_storage.sdcardfs.enabled";
+
+    // We may need to change this in the future when Android finally drops
+    // support for sdcardfs in the future.
+    //
+    // https://android.googlesource.com/platform//system/vold/+/f36bdddc7e5545d361ea8fe16cbac315794874e3
+    //
+    // Things we can't do:
+    //
+    // * Parse /proc/self/mountinfo - vold can't mount it until the user unlocks
+    //   the device for the first time, which happens after the daemon is
+    //   already started.
+    //
+    // * Parse /proc/config.gz - The device might not be using sdcardfs even if
+    //   the kernel supports the filesystem. This is the case on some older
+    //   devices running newer custom Android OS builds.
+
+    system_properties::read_bool(PROPERTY, true)
+        .with_context(|| format!("Failed to query property: {PROPERTY}"))
+}
+
+#[cfg(target_os = "linux")]
+fn is_sdcardfs() -> Result<bool> {
+    Ok(false)
+}
+
+/// Find existing mass storage gadget function or return the default.
+///
+/// Samsung devices have a kernel bug where creating a new mass storage gadget
+/// function fails with:
+///
+/// ```
+/// sysfs: cannot create duplicate filename '/devices/virtual/android_usb/android0/f_mass_storage'
+/// ```
+///
+/// This happens even if all pre-existing mass storage gadget functions are
+/// deleted first.
+fn detect_function_name(gadget: &UsbGadget) -> Result<OsString> {
+    for function in gadget.functions()? {
+        let Some(name) = function.to_str() else {
+            warn!("Ignoring non-UTF-8 function: {function:?}");
+            continue;
+        };
+
+        if name.starts_with(FUNCTION_PREFIX) {
+            debug!("Found preexisting mass storage gadget function: {name:?}");
+            return Ok(function);
+        }
+    }
+
+    Ok(FUNCTION_NAME_DEFAULT.into())
+}
+
+fn negotiate_protocol(stream: &mut UnixStream) -> Result<()> {
+    let client_version = stream
+        .read_u8()
+        .context("Failed to receive protocol version")?;
+    if client_version != message::PROTOCOL_VERSION {
+        stream
+            .write_u8(0)
+            .context("Failed to send protocol version rejection")?;
+
+        bail!("Unsupported client protocol version: {client_version}");
+    }
+
+    stream
+        .write_u8(1)
+        .context("Failed to send protocol version acknowledgement")?;
+
+    Ok(())
+}
+
+fn handle_get_functions_request() -> Result<BTreeMap<OsString, OsString>> {
+    let gadget = UsbGadget::new(GADGET_ROOT, CONFIGS_NAME)?;
+
+    gadget.configs()
+}
+
+fn handle_set_mass_storage_request(request: &SetMassStorageRequest) -> Result<()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    let _lock = LOCK.lock().unwrap();
+
+    for device in &request.devices {
+        debug!("Checking device request: {device:?}");
+
+        let fd_path = format!("/proc/self/fd/{}", device.fd.as_raw_fd());
+
+        match fs::read_link(&fd_path) {
+            Ok(p) => debug!("- Path: {p:?}"),
+            Err(e) => warn!("- Path: <Unknown>: {e:?}"),
+        }
+
+        match util::fd_get_label(device.fd.as_fd()) {
+            Ok(l) => debug!("- Label: {l:?}"),
+            Err(e) => warn!("- Label: <Unknown>: {e:?}"),
+        }
+
+        let stat = rustix::fs::fstat(&device.fd)
+            .with_context(|| format!("Failed to stat file: {:?}", device.fd))?;
+        let file_type = FileType::from_raw_mode(stat.st_mode);
+
+        debug! {"- Type: {file_type:?}"};
+        debug! {"- Mode: {:o}", Mode::from_raw_mode(stat.st_mode)};
+        debug! {"- UID: {}", stat.st_uid};
+        debug! {"- GID: {}", stat.st_gid};
+        debug! {"- Size: {}", stat.st_size};
+
+        if file_type != FileType::RegularFile {
+            bail!("Not a regular file: {:?}: {file_type:?}", device.fd);
+        }
+    }
+
+    let config_name = OsStr::new(CONFIG_NAME);
+    let gadget = UsbGadget::new(GADGET_ROOT, CONFIGS_NAME)?;
+    let function_name = detect_function_name(&gadget)?;
+
+    // We need to SIGSTOP this process while we make our changes to prevent it
+    // from constantly trying to ensure that UDC is set to the expected value.
+    // Stopping the `vendor.usb-gadget-hal` init service would be cleaner, but
+    // does not work because the HAL fails restore its state properly after it
+    // starts back up, causing UDC to be cleared every time the device is
+    // unplugged.
+    let gadget_hal_stoppers = ProcessIter::new()
+        .context("Failed to search running processes")?
+        .filter(|result| {
+            if let Ok((_, name)) = result {
+                // The Pixel 6 Pro has a ".gs101" suffix. If the naming becomes
+                // too convoluted in the future, we can filter by SELinux label.
+                if let Some(name) = name.to_str() {
+                    name.starts_with(GADGET_HAL_PROCESS)
+                } else {
+                    false
+                }
+            } else {
+                true
+            }
+        })
+        .map(|r| r.and_then(|(fd, _)| ProcessStopper::new(fd).map_err(io::Error::from)))
+        // Ignore ENOSYS when pidfd is unsupported. This will never happen on
+        // supported Android versions, but the daemon needs to be able to run on
+        // the Android 10 emulator to test sdcardfs.
+        .filter(|r| {
+            !r.as_ref()
+                .is_err_and(|e| e.kind() == io::ErrorKind::Unsupported)
+        })
+        .collect::<io::Result<Vec<_>>>()
+        .context("Failed to search for gadget HAL process")?;
+    if gadget_hal_stoppers.is_empty() {
+        warn!("No gadget HAL process found: {GADGET_HAL_PROCESS}*");
+    }
+
+    let Some(controller) = usb_controller()? else {
+        bail!("Cannot determine ID of USB controller");
+    };
+
+    debug!("Disassociating gadget config from controller");
+    gadget.set_controller(None)?;
+
+    if gadget.delete_config(config_name)? {
+        debug!("Deleted old mass storage config");
+    }
+
+    // Extra LUNs must be deleted first, but lun.0 cannot be deleted.
+    if let Some(function) = gadget.open_mass_storage_function(&function_name)? {
+        for lun in function.luns()? {
+            if lun == 0 {
+                function.clear_lun(lun)?;
+                debug!("Unregistered LUN #{lun}");
+            } else if function.delete_lun(lun)? {
+                debug!("Deleted LUN #{lun}");
+            }
+        }
+    }
+
+    // On Samsung devices, mass storage gadget functions cannot be recreated.
+    if function_name == FUNCTION_NAME_DEFAULT && gadget.delete_function(&function_name)? {
+        debug!("Deleted old mass storage function");
+    }
+
+    if !request.devices.is_empty() {
+        if gadget.create_function(&function_name)? {
+            debug!("Created mass storage function");
+        }
+
+        let function = gadget
+            .open_mass_storage_function(&function_name)?
+            .ok_or_else(|| anyhow!("Newly created function does not exist: {function_name:?}"))?;
+        for (lun, device) in request.devices.iter().enumerate() {
+            // lun.0 exists by default.
+            if lun > 0 && function.create_lun(lun as u8)? {
+                debug!("Created LUN #{lun}");
+            }
+
+            debug!("Associating LUN #{lun} with {device:?}");
+            function.set_lun(lun as u8, device.fd.as_fd(), device.cdrom, device.ro)?;
+        }
+
+        if gadget.create_config(config_name, &function_name)? {
+            debug!("Created mass storage config");
+        }
+    }
+
+    debug!("Applying config to USB controller: {controller:?}");
+    gadget.set_controller(Some(&controller))?;
+
+    Ok(())
+}
+
+fn handle_get_mass_storage_request() -> Result<Vec<ActiveMassStorageDevice>> {
+    let gadget = UsbGadget::new(GADGET_ROOT, CONFIGS_NAME)?;
+    let function_name = detect_function_name(&gadget)?;
+    let mut devices = vec![];
+
+    if let Some(function) = gadget.open_mass_storage_function(&function_name)? {
+        for lun in function.luns()? {
+            let (file, cdrom, ro) = function.get_lun(lun)?;
+
+            // On Samsung devices, the mass storage gadget function cannot be
+            // recreated, so we leave it in an unconfigured state.
+            if let Some(file) = file {
+                devices.push(ActiveMassStorageDevice { file, cdrom, ro });
+            }
+        }
+    }
+
+    Ok(devices)
+}
+
+fn handle_request(request: &Request) -> Response {
+    let ret = match request {
+        Request::GetFunctions(_) => handle_get_functions_request()
+            .map(|functions| Response::GetFunctions(GetFunctionsResponse { functions })),
+        Request::SetMassStorage(r) => handle_set_mass_storage_request(r)
+            .map(|()| Response::SetMassStorage(SetMassStorageResponse)),
+        Request::GetMassStorage(_) => handle_get_mass_storage_request()
+            .map(|devices| Response::GetMassStorage(GetMassStorageResponse { devices })),
+    };
+
+    ret.unwrap_or_else(|e| {
+        warn!("{e:?}");
+
+        Response::Error(ErrorResponse {
+            message: format!("{e:?}"),
+        })
+    })
+}
+
+fn handle_client(mut stream: UnixStream) -> Result<()> {
+    check_selinux()?;
+    negotiate_protocol(&mut stream)?;
+
+    loop {
+        let request = match Request::from_socket(&mut stream) {
+            Ok(r) => r,
+            Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => break Ok(()),
+            Err(e) => return Err(e).context("Failed to receive request"),
+        };
+
+        debug!("Request: {request:?}");
+
+        let response = handle_request(&request);
+
+        debug!("Response: {response:?}");
+
+        response
+            .to_socket(&mut stream)
+            .with_context(|| format!("Failed to send response: {response:?}"))?;
+    }
+}
+
+fn drop_privileges() -> Result<()> {
+    // The only thing we need root level permissions for is chown'ing newly
+    // created files on configfs. Unlike other filesystems, newly created files
+    // on configfs are always owned by root:root. There was a patch from 2021 to
+    // fix this behavior, but it was never accepted.
+    // https://lore.kernel.org/lkml/20210123205516.2738060-1-zenczykowski@gmail.com/
+    //
+    // For ADB/MTP/etc., AOSP works around this by having an init script create
+    // the paths on configfs and chown them appropriately. This approach does
+    // not work for us because creating a LUN that's not associated with a file
+    // still results in a 0-sized device being advertised. This prevents some
+    // machines from booting from another mass storage device. Bootable devices
+    // is an important use case for MSD, so we're stuck with requiring elevated
+    // privileges.
+    //
+    // There are 2 ways the daemon can be run. If we're running runing as
+    // system:system, then the parent process is responsible for execve'ing with
+    // CAP_CHROOT allowed. If we're running as root:root, then we drop all
+    // capabilities besides CAP_CHROOT and drop privileges to system:system.
+
+    let system_uid = Uid::from_raw(1000);
+    let system_gid = Gid::from_raw(1000);
+    let real_uid = rustix::process::getuid();
+    let real_gid = rustix::process::getgid();
+
+    let supplementary_groups: &[Gid] = if is_sdcardfs()? {
+        &[
+            // Android 10 emulator.
+            Gid::from_raw(1015), // sdcard_rw
+            // Samsung.
+            Gid::from_raw(1023), // media_rw
+            Gid::from_raw(9997), // everybody
+        ]
+    } else {
+        &[]
+    };
+
+    if real_uid == system_uid && real_gid == system_gid {
+        let capability_set =
+            rustix::thread::capabilities(None).context("Failed to query capabilities")?;
+
+        if !capability_set.effective.contains(CapabilitySet::CHOWN) {
+            bail!("CAP_CHOWN is required when running as system user");
+        }
+    } else if real_uid == Uid::ROOT && real_gid == Gid::ROOT {
+        rustix::thread::set_keep_capabilities(true)
+            .context("Failed to set keep capabilities flag")?;
+
+        debug!("uid={system_uid:?}, gid={system_gid:?}, groups={supplementary_groups:?}");
+
+        rustix::thread::set_thread_groups(supplementary_groups)
+            .context("Failed to set supplementary groups")?;
+        rustix::thread::set_thread_res_gid(system_gid, system_gid, system_gid)
+            .context("Failed to switch GID to system group")?;
+        rustix::thread::set_thread_res_uid(system_uid, system_uid, system_uid)
+            .context("Failed to switch UID to system user")?;
+    } else {
+        bail!("Must run as root or system user, not {real_uid:?} {real_gid:?}");
+    }
+
+    let capability_set = CapabilitySets {
+        effective: CapabilitySet::CHOWN,
+        permitted: CapabilitySet::CHOWN,
+        inheritable: CapabilitySet::empty(),
+    };
+
+    rustix::thread::set_capabilities(None, capability_set)
+        .context("Failed to drop capabilities")?;
+
+    Ok(())
+}
+
+pub fn subcommand_daemon(_cli: &DaemonCli) -> Result<()> {
+    drop_privileges()?;
+
+    let listener =
+        UnixListener::bind_addr(&socket_addr()).context("Failed to listen on domain socket")?;
+
+    thread::scope(|scope| -> Result<()> {
+        for stream in listener.incoming() {
+            let stream = stream.context("Failed to accept incoming connection")?;
+            let ucred = rustix::net::sockopt::socket_peercred(&stream)
+                .context("Failed to get socket peer credentials")?;
+
+            scope.spawn(move || {
+                let _span = info_span!(
+                    "peer",
+                    pid = ucred.pid.as_raw_nonzero(),
+                    uid = ucred.uid.as_raw(),
+                    gid = ucred.gid.as_raw(),
+                )
+                .entered();
+
+                if ucred.pid == rustix::process::getpid() {
+                    error!("SELinux rules are broken; able to connect to self");
+                    return;
+                }
+
+                info!("Received connection");
+
+                if let Err(e) = handle_client(stream) {
+                    error!("Thread failed: {e:?}");
+                }
+            });
+        }
+
+        unreachable!()
+    })?;
+
+    Ok(())
+}
+
+/// Run daemon.
+#[derive(Debug, Parser)]
+pub struct DaemonCli;

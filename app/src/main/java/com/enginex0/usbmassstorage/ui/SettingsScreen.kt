@@ -57,6 +57,9 @@ import com.enginex0.usbmassstorage.BuildConfig
 import com.enginex0.usbmassstorage.R
 import com.enginex0.usbmassstorage.data.AccentColor
 import com.enginex0.usbmassstorage.data.AccentPreference
+import com.enginex0.usbmassstorage.data.FileSystemType
+import com.enginex0.usbmassstorage.data.FormatPreference
+import androidx.compose.material3.FilterChip
 import com.enginex0.usbmassstorage.viewmodel.UiState
 import com.topjohnwu.superuser.Shell
 
@@ -176,6 +179,8 @@ fun SettingsScreen(
             }
 
             AccentColorCard(context, onAccentChanged)
+
+            DefaultFormatCard(context)
 
             Text(stringResource(R.string.settings_debug_title), style = MaterialTheme.typography.titleMedium)
 
@@ -320,6 +325,47 @@ private fun AccentOption(
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(20.dp)
             )
+        }
+    }
+}
+
+@Composable
+private fun DefaultFormatCard(context: Context) {
+    var selected by remember { mutableStateOf(FormatPreference.load(context)) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(stringResource(R.string.settings_default_format), style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = selected == FileSystemType.FAT32,
+                    onClick = {
+                        selected = FileSystemType.FAT32
+                        FormatPreference.save(context, FileSystemType.FAT32)
+                    },
+                    label = { Text(stringResource(R.string.format_fat32)) }
+                )
+                FilterChip(
+                    selected = selected == FileSystemType.EXFAT,
+                    onClick = {
+                        selected = FileSystemType.EXFAT
+                        FormatPreference.save(context, FileSystemType.EXFAT)
+                    },
+                    label = { Text(stringResource(R.string.format_exfat)) }
+                )
+                FilterChip(
+                    selected = selected == FileSystemType.NONE,
+                    onClick = {
+                        selected = FileSystemType.NONE
+                        FormatPreference.save(context, FileSystemType.NONE)
+                    },
+                    label = { Text(stringResource(R.string.format_none)) }
+                )
+            }
         }
     }
 }
