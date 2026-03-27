@@ -113,6 +113,14 @@
     <string name="images_delete_message">Permanently delete \"%s\"? This cannot be undone.</string>
     <string name="images_export_success">Exported to Downloads</string>
     <string name="images_export_failed">Export failed</string>
+    <string name="images_selected_count">%d selected</string>
+    <string name="images_clear_unmounted">Clear Unmounted</string>
+    <string name="images_clear_unmounted_title">Clear Unmounted Images?</string>
+    <string name="images_clear_unmounted_message">Permanently delete %d unmounted images? Mounted images are protected.</string>
+    <string name="images_batch_delete_title">Delete %d Images?</string>
+    <string name="images_batch_delete_message">Permanently delete %d selected images? This cannot be undone.</string>
+    <string name="images_storage_hint">Clear unused images regularly to free storage</string>
+    <string name="images_no_unmounted">All images are currently mounted</string>
 
     <string name="format_fat32">FAT32</string>
     <string name="format_exfat">exFAT</string>

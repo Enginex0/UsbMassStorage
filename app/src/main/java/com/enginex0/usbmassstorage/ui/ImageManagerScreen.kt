@@ -10,6 +10,8 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,6 +31,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -36,6 +42,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -123,7 +131,12 @@ fun ImageManagerScreen(
     var showCreateSheet by remember { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<DiskImage?>(null) }
     var exportingPath by remember { mutableStateOf<String?>(null) }
+    var selected by remember { mutableStateOf(emptySet<String>()) }
+    var showMenu by remember { mutableStateOf(false) }
+    var showClearConfirm by remember { mutableStateOf(false) }
+    var showBatchDelete by remember { mutableStateOf(false) }
 
+    val inSelectionMode = selected.isNotEmpty()
     val exportSuccessMsg = stringResource(R.string.images_export_success)
     val exportFailedMsg = stringResource(R.string.images_export_failed)
 
@@ -167,29 +180,123 @@ fun ImageManagerScreen(
         )
     }
 
+    if (showClearConfirm) {
+        val count = images.count { it.name !in mountedNames }
+        AlertDialog(
+            onDismissRequest = { showClearConfirm = false },
+            title = { Text(stringResource(R.string.images_clear_unmounted_title)) },
+            text = { Text(stringResource(R.string.images_clear_unmounted_message, count)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showClearConfirm = false
+                    scope.launch {
+                        withContext(Dispatchers.IO) {
+                            images.filter { it.name !in mountedNames }
+                                .forEach { it.file.delete() }
+                        }
+                        selected = emptySet()
+                        refreshTrigger++
+                    }
+                }) {
+                    Text(stringResource(R.string.action_delete), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirm = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
+    }
+
+    if (showBatchDelete) {
+        AlertDialog(
+            onDismissRequest = { showBatchDelete = false },
+            title = { Text(stringResource(R.string.images_batch_delete_title, selected.size)) },
+            text = { Text(stringResource(R.string.images_batch_delete_message, selected.size)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    val toDelete = selected.toSet()
+                    showBatchDelete = false
+                    scope.launch {
+                        withContext(Dispatchers.IO) {
+                            toDelete.forEach { path ->
+                                val f = java.io.File(path)
+                                if (f.name !in mountedNames) f.delete()
+                            }
+                        }
+                        selected = emptySet()
+                        refreshTrigger++
+                    }
+                }) {
+                    Text(stringResource(R.string.action_delete), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBatchDelete = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.images_title)) },
+                title = {
+                    if (inSelectionMode) Text(stringResource(R.string.images_selected_count, selected.size))
+                    else Text(stringResource(R.string.images_title))
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface
                 ),
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.action_back)
-                        )
+                    if (inSelectionMode) {
+                        IconButton(onClick = { selected = emptySet() }) {
+                            Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_close))
+                        }
+                    } else {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
+                        }
+                    }
+                },
+                actions = {
+                    if (!inSelectionMode) {
+                        IconButton(onClick = { showCreateSheet = true }) {
+                            Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.images_create_new))
+                        }
+                        Box {
+                            IconButton(onClick = { showMenu = true }) {
+                                Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_menu))
+                            }
+                            DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.images_clear_unmounted)) },
+                                    onClick = {
+                                        showMenu = false
+                                        if (images.isEmpty() || images.none { it.name !in mountedNames }) {
+                                            Toast.makeText(context, context.getString(R.string.images_no_unmounted), Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            showClearConfirm = true
+                                        }
+                                    }
+                                )
+                            }
+                        }
                     }
                 }
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { showCreateSheet = true }) {
-                Icon(
-                    Icons.Filled.Add,
-                    contentDescription = stringResource(R.string.images_create_new)
-                )
+            if (inSelectionMode) {
+                FloatingActionButton(
+                    onClick = { showBatchDelete = true },
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError
+                ) {
+                    Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.action_delete))
+                }
             }
         }
     ) { padding ->
@@ -245,10 +352,13 @@ fun ImageManagerScreen(
                     modifier = Modifier.fillMaxSize().padding(padding)
                 ) {
                     items(images, key = { it.file.absolutePath }) { image ->
+                        val isMounted = image.name in mountedNames
                         ImageCard(
                             image = image,
-                            isMounted = image.name in mountedNames,
+                            isMounted = isMounted,
                             isExporting = exportingPath == image.file.absolutePath,
+                            inSelectionMode = inSelectionMode,
+                            isSelected = image.file.absolutePath in selected,
                             onMount = {
                                 onMount(
                                     DeviceInfo(
@@ -280,7 +390,22 @@ fun ImageManagerScreen(
                                     ).show()
                                 }
                             },
-                            onDelete = { deleteTarget = image }
+                            onDelete = { deleteTarget = image },
+                            onToggleSelect = {
+                                if (!isMounted) {
+                                    val path = image.file.absolutePath
+                                    selected = if (path in selected) selected - path else selected + path
+                                }
+                            }
+                        )
+                    }
+                    item {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            stringResource(R.string.images_storage_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
                         )
                     }
                 }
@@ -300,14 +425,18 @@ fun ImageManagerScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ImageCard(
     image: DiskImage,
     isMounted: Boolean,
     isExporting: Boolean,
+    inSelectionMode: Boolean,
+    isSelected: Boolean,
     onMount: () -> Unit,
     onExport: () -> Unit,
     onDelete: () -> Unit,
+    onToggleSelect: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val glow = rememberInfiniteTransition(label = "card")
@@ -324,7 +453,14 @@ private fun ImageCard(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .border(1.dp, tint.copy(alpha = borderAlpha), RoundedCornerShape(12.dp)),
+            .then(
+                if (isSelected) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp))
+                else Modifier.border(1.dp, tint.copy(alpha = borderAlpha), RoundedCornerShape(12.dp))
+            )
+            .combinedClickable(
+                onClick = { if (inSelectionMode && !isMounted) onToggleSelect() },
+                onLongClick = { if (!isMounted) onToggleSelect() }
+            ),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainer
         ),
@@ -332,9 +468,16 @@ private fun ImageCard(
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                val icon = if (image.extension == "iso") Icons.Filled.Album
-                else Icons.Filled.Storage
-                Icon(icon, null, modifier = Modifier.size(28.dp), tint = tint)
+                val icon = when {
+                    isSelected -> Icons.Filled.CheckCircle
+                    image.extension == "iso" -> Icons.Filled.Album
+                    else -> Icons.Filled.Storage
+                }
+                Icon(
+                    icon, null,
+                    modifier = Modifier.size(28.dp),
+                    tint = if (isSelected) MaterialTheme.colorScheme.primary else tint
+                )
                 Spacer(Modifier.width(12.dp))
 
                 Column(modifier = Modifier.weight(1f)) {
@@ -379,44 +522,46 @@ private fun ImageCard(
                 }
             }
 
-            Spacer(Modifier.height(12.dp))
+            if (!inSelectionMode) {
+                Spacer(Modifier.height(12.dp))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedButton(
-                    onClick = onMount,
-                    enabled = !isMounted,
-                    modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
-                ) { Text(stringResource(R.string.action_mount)) }
-
-                OutlinedButton(
-                    onClick = onExport,
-                    enabled = !isExporting,
-                    modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    if (isExporting) {
-                        CircularProgressIndicator(
-                            Modifier.size(16.dp),
-                            strokeWidth = 2.dp
-                        )
-                        Spacer(Modifier.width(4.dp))
-                    }
-                    Text(stringResource(R.string.action_export))
-                }
+                    OutlinedButton(
+                        onClick = onMount,
+                        enabled = !isMounted,
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                    ) { Text(stringResource(R.string.action_mount)) }
 
-                OutlinedButton(
-                    onClick = onDelete,
-                    enabled = !isMounted,
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error
-                    ),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
-                ) { Text(stringResource(R.string.action_delete)) }
+                    OutlinedButton(
+                        onClick = onExport,
+                        enabled = !isExporting,
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                    ) {
+                        if (isExporting) {
+                            CircularProgressIndicator(
+                                Modifier.size(16.dp),
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(Modifier.width(4.dp))
+                        }
+                        Text(stringResource(R.string.action_export))
+                    }
+
+                    OutlinedButton(
+                        onClick = onDelete,
+                        enabled = !isMounted,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error
+                        ),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                    ) { Text(stringResource(R.string.action_delete)) }
+                }
             }
         }
     }
