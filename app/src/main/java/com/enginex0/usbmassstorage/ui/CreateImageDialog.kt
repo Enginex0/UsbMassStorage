@@ -174,7 +174,7 @@ fun CreateImageSheet(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var filename by remember { mutableStateOf("disk") }
+    var filename by remember { mutableStateOf("disk1") }
     var selectedExt by remember { mutableStateOf(".img") }
     var selectedPresetIndex by remember { mutableStateOf(1) }
     var customSize by remember { mutableStateOf("") }
@@ -187,6 +187,14 @@ fun CreateImageSheet(
     var hasExfat by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
+        val dir = java.io.File(context.getExternalFilesDir(null), "images")
+        val existing = withContext(Dispatchers.IO) {
+            dir.listFiles()?.map { it.nameWithoutExtension }?.toSet() ?: emptySet()
+        }
+        var n = 1
+        while ("disk$n" in existing) n++
+        filename = "disk$n"
+
         hasVfat = findBundledMkfs() != null
         hasExfat = checkBinary("mkfs.exfat")
         if (selectedFormat == FileSystemType.EXFAT && !hasExfat) {

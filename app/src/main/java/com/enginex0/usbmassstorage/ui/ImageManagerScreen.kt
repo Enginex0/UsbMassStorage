@@ -104,7 +104,7 @@ private fun formatSize(bytes: Long): String = when {
 }
 
 private fun formatDate(millis: Long): String {
-    val sdf = java.text.SimpleDateFormat("MMM d, yyyy", java.util.Locale.getDefault())
+    val sdf = java.text.SimpleDateFormat("MMM d, yyyy  h:mm a", java.util.Locale.getDefault())
     return sdf.format(java.util.Date(millis))
 }
 

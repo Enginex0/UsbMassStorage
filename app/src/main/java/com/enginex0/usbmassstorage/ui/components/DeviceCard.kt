@@ -218,6 +218,13 @@ fun DeviceCard(
                     InfoRow(stringResource(R.string.device_label_format), device.fsType)
                     Spacer(Modifier.height(6.dp))
                 }
+                val created = java.io.File(device.file).let { f ->
+                    if (f.exists()) formatDateTime(f.lastModified()) else null
+                }
+                if (created != null) {
+                    InfoRow(stringResource(R.string.device_label_created), created)
+                    Spacer(Modifier.height(6.dp))
+                }
                 InfoRow(stringResource(R.string.device_label_lun), index.toString())
             }
         }
@@ -247,6 +254,11 @@ private fun InfoRow(label: String, value: String) {
                 .padding(start = 16.dp)
         )
     }
+}
+
+private fun formatDateTime(millis: Long): String {
+    val sdf = java.text.SimpleDateFormat("MMM d, yyyy  h:mm a", java.util.Locale.getDefault())
+    return sdf.format(java.util.Date(millis))
 }
 
 private fun formatSize(bytes: Long): String = when {

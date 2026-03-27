@@ -121,6 +121,7 @@
     <string name="settings_bg_opacity">Background Opacity</string>
     <string name="settings_bg_opacity_value">%d%%</string>
     <string name="device_label_format">Format</string>
+    <string name="device_label_created">Created</string>
     <string name="eject_confirm_title">Eject Device?</string>
     <string name="eject_confirm_message">Unmount \"%s\" from USB? The computer will lose access to this drive.</string>
 
