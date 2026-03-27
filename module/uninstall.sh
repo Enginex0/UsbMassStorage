@@ -1,29 +1,27 @@
 #!/system/bin/sh
-# UsbMassStorage uninstall cleanup
-
 TAG="usbmassstorage"
+PKG="com.enginex0.usbmassstorage"
 DATA_DIR="/data/adb/usbmassstorage"
 LOCK_FILE="/dev/usbms_svc_lock"
-PKG="com.enginex0.usbmassstorage"
 
-echo "${TAG}: uninstall started" > /dev/kmsg
+log() { echo "${TAG}: $1" > /dev/kmsg; }
 
-# Remove persistent data
-if [ -d "$DATA_DIR" ]; then
-    rm -rf "$DATA_DIR"
-    echo "${TAG}: removed $DATA_DIR" > /dev/kmsg
-fi
+log "uninstall started"
 
-# Remove lock file
-if [ -f "$LOCK_FILE" ]; then
-    rm -f "$LOCK_FILE"
-    echo "${TAG}: removed lock file" > /dev/kmsg
-fi
+for pid in $(pidof daemon 2>/dev/null); do
+    if grep -q "msdd\|usbmassstorage" /proc/$pid/cmdline 2>/dev/null; then
+        kill "$pid" 2>/dev/null
+        log "killed daemon pid $pid"
+    fi
+done
 
-# Uninstall companion app
 if pm list packages 2>/dev/null | grep -q "$PKG"; then
+    pm uninstall --user 0 "$PKG" >/dev/null 2>&1
     pm uninstall "$PKG" >/dev/null 2>&1
-    echo "${TAG}: uninstalled $PKG" > /dev/kmsg
+    log "uninstalled $PKG"
 fi
 
-echo "${TAG}: uninstall complete" > /dev/kmsg
+rm -rf "$DATA_DIR"
+rm -f "$LOCK_FILE"
+
+log "uninstall complete"

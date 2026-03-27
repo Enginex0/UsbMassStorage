@@ -51,12 +51,22 @@ while true; do
     echo "${TAG}: launching daemon (ABI=$ABI)" > /dev/kmsg
     /system/bin/runcon u:r:msd_daemon:s0 "$BIN" daemon \
         --log-target logcat --log-level debug \
-        --automount-config /data/adb/usbmassstorage/automount.conf
-    rc=$?
-    if [ $rc -eq 0 ]; then
+        --automount-config /data/adb/usbmassstorage/automount.conf &
+    DAEMON_PID=$!
+
+    # If daemon survives 5s, it bound the socket and is healthy
+    sleep 5
+    if kill -0 "$DAEMON_PID" 2>/dev/null; then
         echo "COUNT=0" > /data/adb/usbmassstorage/count.sh 2>/dev/null
-        break
+        echo "${TAG}: daemon alive (pid=$DAEMON_PID), boot counter reset" > /dev/kmsg
+        wait "$DAEMON_PID"
+        rc=$?
+    else
+        wait "$DAEMON_PID"
+        rc=$?
     fi
+
+    [ $rc -eq 0 ] && break
     echo "${TAG}: daemon exited ($rc), respawning in ${BACKOFF}s" > /dev/kmsg
     sleep "$BACKOFF"
     BACKOFF=$((BACKOFF * 2))
