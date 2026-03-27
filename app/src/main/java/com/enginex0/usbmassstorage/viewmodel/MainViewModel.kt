@@ -67,6 +67,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val daemonLock = Any()
     private val store = DeviceStore(application)
     private var reconnectJob: Job? = null
+    private var activeJob: Job? = null
 
     init {
         Log.d(TAG, "ViewModel init, connecting to daemon")
@@ -96,7 +97,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun refresh() {
-        viewModelScope.launch {
+        activeJob?.cancel()
+        activeJob = viewModelScope.launch {
             _uiState.update { it.copy(connecting = true) }
             Log.d(TAG, "refresh: starting daemon connection")
 
@@ -157,7 +159,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setMassStorage(context: Context, devices: List<DeviceInfo>) {
-        viewModelScope.launch {
+        activeJob?.cancel()
+        activeJob = viewModelScope.launch {
             Log.d(TAG, "setMassStorage: mounting ${devices.size} devices")
             _uiState.update { it.copy(mounting = true) }
 
@@ -284,13 +287,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun removeDevice(context: Context, index: Int) {
+        val active = _uiState.value.activeDevices
+        if (index < 0 || index >= active.size) return
+        val targetUri = active[index].toDeviceInfo().uri
+
         ejectDevice(context, index)
-        val saved = _uiState.value.savedDevices.toMutableList()
-        if (index < saved.size) {
-            val removed = saved.removeAt(index)
-            store.save(saved)
-            _uiState.update { it.copy(savedDevices = saved) }
-            releasePersistablePermission(context, removed.uri)
+
+        viewModelScope.launch {
+            val saved = _uiState.value.savedDevices.toMutableList()
+            val savedIndex = saved.indexOfFirst { it.uri == targetUri }
+            if (savedIndex >= 0) {
+                val removed = saved.removeAt(savedIndex)
+                withContext(Dispatchers.IO) { store.save(saved) }
+                _uiState.update { it.copy(savedDevices = saved) }
+                releasePersistablePermission(context, removed.uri)
+            }
         }
     }
 
