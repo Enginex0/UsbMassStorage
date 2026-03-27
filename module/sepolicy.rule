@@ -53,5 +53,11 @@ allow msd_daemon usb_configfs file { create getattr open read setattr write }
 allow msd_daemon usb_configfs lnk_file { create read setattr unlink }
 allow msd_daemon sdcardfs file { getattr read open write }
 allow msd_daemon media_rw_data_file file { getattr read open write }
+allow msd_daemon media_rw_data_file dir { getattr search }
 allow msd_daemon vfat file { getattr read open write }
 allow msd_daemon exfat file { getattr read open write }
+
+allow msd_daemon system_data_file dir { getattr search }
+allow msd_daemon system_data_root_file dir { getattr search }
+allow msd_daemon adb_data_file dir { getattr search }
+allow msd_daemon adb_data_file file { getattr open read }

@@ -38,7 +38,7 @@ echo "COUNT=0" > /data/adb/usbmassstorage/count.sh 2>/dev/null
 BACKOFF=1
 while true; do
     echo "${TAG}: launching daemon (ABI=$ABI)" > /dev/kmsg
-    /system/bin/runcon u:r:msd_daemon:s0 "$BIN" daemon --log-target logcat --log-level debug
+    /system/bin/runcon u:r:msd_daemon:s0 "$BIN" daemon --log-target logcat --log-level debug --automount-config /data/adb/usbmassstorage/automount.conf
     rc=$?
     [ $rc -eq 0 ] && break
     echo "${TAG}: daemon exited ($rc), respawning in ${BACKOFF}s" > /dev/kmsg

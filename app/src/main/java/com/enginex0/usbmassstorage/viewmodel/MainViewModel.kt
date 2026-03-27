@@ -459,12 +459,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun enrichWithSize(devices: List<ActiveDevice>): List<ActiveDevice> =
         devices.map { dev ->
-            val size = try { java.io.File(dev.file).length() } catch (_: Exception) { -1L }
+            val path = normalizeMediaPath(dev.file)
+            val size = try { java.io.File(path).length() } catch (_: Exception) { -1L }
             val fs = try {
-                val r = Shell.cmd("blkid -s TYPE -o value '${dev.file}'").exec()
+                val r = Shell.cmd("blkid -s TYPE -o value '$path'").exec()
                 if (r.isSuccess && r.out.isNotEmpty()) r.out[0].trim().uppercase() else null
             } catch (_: Exception) { null }
-            dev.copy(size = size, fsType = fs)
+            dev.copy(file = path, size = size, fsType = fs)
         }
 
     override fun onCleared() {
@@ -476,6 +477,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             client = null
         }
     }
+}
+
+private fun normalizeMediaPath(path: String): String {
+    if (path.startsWith("/data/media/")) {
+        return "/storage/emulated/${path.removePrefix("/data/media/")}"
+    }
+    return path
 }
 
 private class AppFuseException(message: String) : Exception(message)

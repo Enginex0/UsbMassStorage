@@ -21,7 +21,7 @@ use std::{
         fd::{AsFd, AsRawFd},
         unix::net::{SocketAddr, UnixListener, UnixStream},
     },
-    path::Path,
+    path::{Path, PathBuf},
     sync::Mutex,
     thread,
 };
@@ -43,8 +43,8 @@ use tracing::{debug, error, info, info_span, warn};
 use crate::{
     message::{
         self, ActiveMassStorageDevice, ErrorResponse, FromSocket, GetFunctionsResponse,
-        GetMassStorageResponse, Request, Response, SetMassStorageRequest, SetMassStorageResponse,
-        ToSocket,
+        GetMassStorageResponse, MassStorageDevice, Request, Response, SetMassStorageRequest,
+        SetMassStorageResponse, ToSocket,
     },
     usb::UsbGadget,
     util::{self, ProcessIter, ProcessStopper},
@@ -471,13 +471,140 @@ fn drop_privileges() -> Result<()> {
     Ok(())
 }
 
-pub fn subcommand_daemon(_cli: &DaemonCli) -> Result<()> {
+struct AutomountEntry {
+    path: PathBuf,
+    cdrom: bool,
+    ro: bool,
+}
+
+fn load_automount_config(config_path: &Path) -> Result<Vec<AutomountEntry>> {
+    let content = fs::read_to_string(config_path)
+        .with_context(|| format!("Failed to read automount config: {config_path:?}"))?;
+
+    let mut entries = vec![];
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        let Some((file_path, type_str)) = line.split_once('|') else {
+            warn!("Skipping malformed automount line: {line:?}");
+            continue;
+        };
+
+        let (cdrom, ro) = match type_str {
+            "cdrom" => (true, true),
+            "disk-ro" => (false, true),
+            "disk-rw" => (false, false),
+            _ => {
+                warn!("Skipping unknown device type: {type_str:?}");
+                continue;
+            }
+        };
+
+        entries.push(AutomountEntry {
+            path: PathBuf::from(file_path),
+            cdrom,
+            ro,
+        });
+    }
+
+    Ok(entries)
+}
+
+#[cfg(target_os = "android")]
+fn wait_for_boot_completed() {
+    const PROPERTY: &str = "sys.boot_completed";
+
+    loop {
+        match system_properties::read(PROPERTY) {
+            Ok(Some(ref val)) if val == "1" => {
+                info!("Boot completed, proceeding with auto-mount");
+                return;
+            }
+            _ => {}
+        }
+        thread::sleep(std::time::Duration::from_secs(2));
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn wait_for_boot_completed() {}
+
+fn perform_automount(entries: Vec<AutomountEntry>) -> Result<()> {
+    let active = handle_get_mass_storage_request()?;
+    if !active.is_empty() {
+        info!("Skipping auto-mount: {} devices already active", active.len());
+        return Ok(());
+    }
+
+    let mut devices = vec![];
+    for entry in &entries {
+        let file = if entry.ro {
+            File::open(&entry.path)
+        } else {
+            fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&entry.path)
+        };
+
+        match file {
+            Ok(f) => {
+                devices.push(MassStorageDevice {
+                    fd: f.into(),
+                    cdrom: entry.cdrom,
+                    ro: entry.ro,
+                });
+            }
+            Err(e) => {
+                warn!("Skipping automount file {:?}: {e}", entry.path);
+            }
+        }
+    }
+
+    if devices.is_empty() {
+        info!("No automount files could be opened");
+        return Ok(());
+    }
+
+    info!("Auto-mounting {} devices", devices.len());
+    let request = SetMassStorageRequest { devices };
+    handle_set_mass_storage_request(&request)
+}
+
+pub fn subcommand_daemon(cli: &DaemonCli) -> Result<()> {
+    let automount_entries = cli.automount_config.as_ref().and_then(|path| {
+        match load_automount_config(path) {
+            Ok(entries) if !entries.is_empty() => {
+                info!("Loaded {} automount entries from {path:?}", entries.len());
+                Some(entries)
+            }
+            Ok(_) => None,
+            Err(e) => {
+                debug!("No automount config: {e}");
+                None
+            }
+        }
+    });
+
     drop_privileges()?;
 
     let listener =
         UnixListener::bind_addr(&socket_addr()).context("Failed to listen on domain socket")?;
 
     thread::scope(|scope| -> Result<()> {
+        if let Some(entries) = automount_entries {
+            scope.spawn(move || {
+                wait_for_boot_completed();
+                match perform_automount(entries) {
+                    Ok(()) => info!("Auto-mount completed"),
+                    Err(e) => warn!("Auto-mount failed: {e:?}"),
+                }
+            });
+        }
+
         for stream in listener.incoming() {
             let stream = stream.context("Failed to accept incoming connection")?;
             let ucred = rustix::net::sockopt::socket_peercred(&stream)
@@ -513,4 +640,7 @@ pub fn subcommand_daemon(_cli: &DaemonCli) -> Result<()> {
 
 /// Run daemon.
 #[derive(Debug, Parser)]
-pub struct DaemonCli;
+pub struct DaemonCli {
+    #[arg(long, value_name = "PATH")]
+    automount_config: Option<PathBuf>,
+}

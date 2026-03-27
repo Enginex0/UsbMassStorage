@@ -5,6 +5,7 @@ import android.net.Uri
 import android.util.Log
 import com.enginex0.usbmassstorage.daemon.DeviceInfo
 import com.enginex0.usbmassstorage.daemon.DeviceType
+import com.topjohnwu.superuser.Shell
 
 private const val TAG = "UsbMsStore"
 private const val PREFS_NAME = "device_store"
@@ -47,10 +48,47 @@ class DeviceStore(context: Context) {
             apply()
         }
         Log.d(TAG, "save: ${devices.size} devices persisted")
+        writeAutomountConfig(devices)
     }
 
     fun clear() {
         prefs.edit().clear().apply()
         Log.d(TAG, "clear: all devices removed")
+        Shell.cmd("rm -f $AUTOMOUNT_PATH").exec()
+    }
+
+    private fun writeAutomountConfig(devices: List<DeviceInfo>) {
+        val lines = devices.mapNotNull { device ->
+            val path = resolveToLowerFs(device.uri) ?: return@mapNotNull null
+            val type = when (device.type) {
+                DeviceType.CDROM -> "cdrom"
+                DeviceType.DISK_RO -> "disk-ro"
+                DeviceType.DISK_RW -> "disk-rw"
+            }
+            "$path|$type"
+        }
+
+        if (lines.isEmpty()) {
+            Shell.cmd("rm -f $AUTOMOUNT_PATH").exec()
+            return
+        }
+
+        val cmds = mutableListOf(": > $AUTOMOUNT_PATH")
+        lines.forEach { cmds.add("echo '$it' >> $AUTOMOUNT_PATH") }
+        Shell.cmd(*cmds.toTypedArray()).exec()
+        Log.d(TAG, "writeAutomountConfig: ${lines.size} entries")
+    }
+
+    private fun resolveToLowerFs(uri: Uri): String? {
+        if (uri.scheme != "file") return null
+        val path = uri.path ?: return null
+        if (path.startsWith("/storage/emulated/")) {
+            return "/data/media/${path.removePrefix("/storage/emulated/")}"
+        }
+        return path
+    }
+
+    companion object {
+        private const val AUTOMOUNT_PATH = "/data/adb/usbmassstorage/automount.conf"
     }
 }

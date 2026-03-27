@@ -93,8 +93,35 @@ bold "UsbMassStorage full pipeline"
 echo ""
 
 if [[ "$BUILD" == true ]]; then
-    bold "==> Building APK ($BUILD_TYPE)"
+    bold "==> Building daemon (Rust, 3 ABIs)"
     cd "$PROJECT_ROOT"
+
+    NDK_TOOLCHAIN="/home/president/Android/Sdk/ndk/29.0.14206865/toolchains/llvm/prebuilt/linux-x86_64"
+    if [[ ! -d "$NDK_TOOLCHAIN" ]]; then
+        red "NDK toolchain not found: $NDK_TOOLCHAIN"
+        exit 1
+    fi
+    NDK_SYSROOT="$NDK_TOOLCHAIN/sysroot"
+
+    export CC_aarch64_linux_android="$NDK_TOOLCHAIN/bin/aarch64-linux-android30-clang"
+    export CC_armv7_linux_androideabi="$NDK_TOOLCHAIN/bin/armv7a-linux-androideabi30-clang"
+    export CC_x86_64_linux_android="$NDK_TOOLCHAIN/bin/x86_64-linux-android30-clang"
+    export BINDGEN_EXTRA_CLANG_ARGS="--sysroot=$NDK_SYSROOT"
+
+    declare -A ABI_MAP=(
+        [aarch64-linux-android]=arm64-v8a
+        [armv7-linux-androideabi]=armeabi-v7a
+        [x86_64-linux-android]=x86_64
+    )
+    for target in "${!ABI_MAP[@]}"; do
+        abi="${ABI_MAP[$target]}"
+        printf '    %-30s' "$target"
+        cargo build --release --target "$target" -q
+        cp "target/$target/release/daemon" "$MODULE_DIR/bin/$abi/daemon"
+        green "ok"
+    done
+
+    bold "==> Building APK ($BUILD_TYPE)"
     if [[ "$BUILD_TYPE" == "release" ]]; then
         ./gradlew assembleRelease -q
         APK_PATH="$PROJECT_ROOT/app/build/outputs/apk/release/app-release.apk"

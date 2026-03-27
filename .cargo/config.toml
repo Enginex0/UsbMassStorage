@@ -8,4 +8,5 @@ rustflags = ["-C", "target-feature=+crt-static"]
 
 [target.x86_64-linux-android]
 linker = "/home/president/Android/Sdk/ndk/29.0.14206865/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android30-clang"
-rustflags = ["-C", "target-feature=+crt-static"]
+# x86_64 static libc uses IFUNC resolvers needing __cpu_indicator_init from compiler-rt
+rustflags = ["-C", "target-feature=+crt-static", "-C", "link-arg=/home/president/Android/Sdk/ndk/29.0.14206865/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/21/lib/linux/libclang_rt.builtins-x86_64-android.a"]
