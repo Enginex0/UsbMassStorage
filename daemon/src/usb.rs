@@ -52,10 +52,18 @@ fn write_configfs_file(dir_path: &Path, dir: &Dir, path: &Path, bufs: &[IoSlice]
         .and_then(|d| util::check_fs_magic(d, util::CONFIGFS_MAGIC))
         .with_context(|| format!("Failed to open file for writing: {:?}", dir_path.join(path)))?;
 
+    // Configfs may process each vectored buffer as a separate attribute write.
+    // Keep the value and newline together: a separate newline can unbind UDC.
+    // Use one write, not write_all, since retrying a short write would submit
+    // the remainder as another attribute update.
+    let mut data = Vec::with_capacity(bufs.iter().map(|buf| buf.len()).sum());
+    for buf in bufs {
+        data.extend_from_slice(buf);
+    }
     let n = file
-        .write_vectored(bufs)
+        .write(&data)
         .with_context(|| format!("Failed to write file: {:?}", dir_path.join(path)))?;
-    if n != bufs.iter().map(|b| b.len()).sum() {
+    if n != data.len() {
         bail!("Failed to write data in single syscall");
     }
 
